@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: allure
+      POSTGRES_PASSWORD: allure
+      POSTGRES_DB: allure3
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      ALLURE_DATABASE_URL: postgresql+asyncpg://allure:allure@db:5432/allure3
+      ALLURE_DATABASE_URL_SYNC: postgresql://allure:allure@db:5432/allure3
+      ALLURE_DATA_DIR: /data/allure
+    volumes:
+      - allure_data:/data/allure
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
+  allure_data:
