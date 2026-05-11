@@ -58,6 +58,8 @@ export interface SettingsData {
   data_dir: string
   default_max_runs: number
   allure_version: string
+  database_size_human: string
+  total_dir_size_human: string
   projects: SettingsProject[]
 }
 

@@ -1,6 +1,6 @@
 import os
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Project, Run
@@ -160,9 +160,18 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
             "created_at": str(p.created_at) if p.created_at else None,
         })
 
+    db_size_res = await db.execute(text("SELECT pg_database_size(current_database())"))
+    db_size = db_size_res.scalar() or 0
+
+    total_dir_size = _dir_size(settings.projects_dir) if settings.projects_dir.exists() else 0
+
     return {
         "data_dir": settings.data_dir,
         "default_max_runs": settings.max_runs_default,
         "allure_version": _get_allure_version(),
+        "database_size_bytes": db_size,
+        "database_size_human": _format_bytes(db_size),
+        "total_dir_size_bytes": total_dir_size,
+        "total_dir_size_human": _format_bytes(total_dir_size),
         "projects": project_list,
     }

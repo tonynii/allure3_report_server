@@ -15,10 +15,7 @@ services:
 
   backend:
     build: ./backend
-    environment:
-      ALLURE_DATABASE_URL: postgresql+asyncpg://allure:allure@db:5432/allure3
-      ALLURE_DATABASE_URL_SYNC: postgresql://allure:allure@db:5432/allure3
-      ALLURE_DATA_DIR: /data/allure
+    env_file: ./backend/.env.docker
     volumes:
       - allure_data:/data/allure
     depends_on:
