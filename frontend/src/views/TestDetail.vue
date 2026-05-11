@@ -2,38 +2,49 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getTestResult, type TestResultDetail } from '../api/reports'
-import StatusTag from '../components/StatusTag.vue'
-import StepTree from '../components/StepTree.vue'
-import { formatDuration, formatTime } from '../utils/format'
+import { formatDuration, formatTime, formatSize } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
-const loading = ref(true)
-const test = ref<TestResultDetail | null>(null)
 const key = computed(() => route.params.key as string)
 const runId = computed(() => route.params.runId as string)
 const testId = computed(() => route.params.testId as string)
+const loading = ref(true)
+const error = ref<string | null>(null)
+const test = ref<TestResultDetail | null>(null)
 
 onMounted(async () => {
   try {
     const { data } = await getTestResult(key.value, runId.value, testId.value)
     test.value = data
+  } catch (err: any) {
+    error.value = err.response?.data?.detail || err.message || '加载失败'
   } finally {
     loading.value = false
   }
 })
+
+function downloadAttachment(attId: string) {
+  window.open(`/api/projects/${key.value}/attachments/${attId}`, '_blank')
+}
 </script>
 
 <template>
-  <div v-if="test">
+  <n-spin :show="loading">
+    <n-result v-if="error" status="error" title="加载失败" :description="error">
+      <template #footer>
+        <n-button @click="router.push(`/projects/${key}/runs/${runId}`)">返回</n-button>
+      </template>
+    </n-result>
+
+    <div v-else-if="test">
     <n-space align="center" style="margin-bottom: 24px">
       <n-button text @click="router.push(`/projects/${key}/runs/${runId}`)">← 返回</n-button>
       <n-h2 style="margin: 0">{{ test.name }}</n-h2>
       <StatusTag :status="test.status" />
     </n-space>
 
-    <n-spin :show="loading">
-      <n-grid :cols="2" :x-gap="16" style="margin-bottom: 16px">
+    <n-grid :cols="2" :x-gap="16" style="margin-bottom: 16px">
         <n-gi>
           <n-thing title="基本信息">
             <n-descriptions :columns="1" label-placement="left">
@@ -79,13 +90,16 @@ onMounted(async () => {
       <n-card title="附件" v-if="test.attachments?.length">
         <n-list>
           <n-list-item v-for="a in test.attachments" :key="a.id">
-            <n-space align="center">
-              <n-text>📎 {{ a.name }}</n-text>
-              <n-text depth="3">({{ a.type }}, {{ a.size }} B)</n-text>
+            <n-space align="center" justify="space-between">
+              <n-space align="center">
+                <n-text>📎 {{ a.name || a.source }}</n-text>
+                <n-text depth="3">({{ a.type }}, {{ formatSize(a.size) }})</n-text>
+              </n-space>
+              <n-button size="tiny" ghost @click="downloadAttachment(a.id)">下载</n-button>
             </n-space>
           </n-list-item>
         </n-list>
       </n-card>
-    </n-spin>
-  </div>
+    </div>
+  </n-spin>
 </template>

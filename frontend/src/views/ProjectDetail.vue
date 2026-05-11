@@ -5,6 +5,7 @@ import { useMessage } from 'naive-ui'
 import { useProjectStore } from '../stores/project'
 import { useRunStore } from '../stores/run'
 import { uploadResults } from '../api/reports'
+import { updateProject } from '../api/projects'
 import StatsCards from '../components/StatsCards.vue'
 import PieChart from '../components/PieChart.vue'
 import TrendChart from '../components/TrendChart.vue'
@@ -17,6 +18,8 @@ const projectStore = useProjectStore()
 const runStore = useRunStore()
 const message = useMessage()
 const uploading = ref(false)
+const showSettings = ref(false)
+const editForm = ref({ name: '', description: '', max_runs: 20 })
 
 const key = computed(() => route.params.key as string)
 
@@ -57,6 +60,31 @@ function viewReport(runId?: string) {
   window.open(`/api/projects/${key.value}/reports/${id}/`, '_blank')
 }
 
+function openSettings() {
+  if (!projectStore.current) return
+  editForm.value = {
+    name: projectStore.current.name,
+    description: projectStore.current.description || '',
+    max_runs: projectStore.current.max_runs,
+  }
+  showSettings.value = true
+}
+
+async function handleSave() {
+  try {
+    await updateProject(key.value, {
+      name: editForm.value.name,
+      description: editForm.value.description || undefined,
+      max_runs: editForm.value.max_runs,
+    })
+    await projectStore.fetch(key.value)
+    showSettings.value = false
+    message.success('设置已保存')
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || '保存失败')
+  }
+}
+
 const columns = [
   { title: 'Run ID', key: 'id', render: (row: any) => row.id.slice(0, 8) + '...' },
   { title: '时间', key: 'created_at', render: (row: any) => formatTime(row.created_at) },
@@ -69,10 +97,20 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
+    width: 160,
     render: (row: any) =>
-      row.status === 'completed'
-        ? h('a', { href: '#', onClick: (e: Event) => { e.preventDefault(); viewReport(row.id) } }, '查看报告')
-        : '-',
+      h('n-space', { size: 'small' }, [
+        h('n-button', {
+          size: 'small', ghost: true, type: 'primary',
+          onClick: (e: Event) => { e.stopPropagation(); goToRun(row.id) },
+        }, { default: () => '📊 详情' }),
+        row.status === 'completed'
+          ? h('n-button', {
+              size: 'small', ghost: true, type: 'success',
+              onClick: (e: Event) => { e.stopPropagation(); viewReport(row.id) },
+            }, { default: () => '📄 报告' })
+          : h('span', {}, '-'),
+      ]),
   },
 ]
 </script>
@@ -88,7 +126,9 @@ const columns = [
         <n-upload :show-file-list="false" accept=".zip" @change="handleUpload" :disabled="uploading">
           <n-button :loading="uploading" type="primary">{{ uploading ? '上传中...' : '📤 上传报告' }}</n-button>
         </n-upload>
-        <n-button v-if="latest?.status === 'completed'" @click="viewReport()">查看最新报告</n-button>
+        <n-button v-if="latest?.status === 'completed'" ghost type="primary" @click="goToRun(latest!.id)">📊 最新详情</n-button>
+        <n-button v-if="latest?.status === 'completed'" ghost type="success" @click="viewReport()">📄 最新报告</n-button>
+        <n-button ghost @click="openSettings">⚙️ 设置</n-button>
       </n-space>
     </n-space>
 
@@ -104,5 +144,24 @@ const columns = [
         :row-props="(row: any) => ({ style: 'cursor: pointer', onClick: () => goToRun(row.id) })"
         :pagination="{ pageSize: 10 }" />
     </n-card>
+    <n-modal v-model:show="showSettings" title="⚙️ 项目设置">
+      <n-card style="width: 500px" role="dialog" :bordered="false">
+        <n-form label-placement="left" label-width="100">
+          <n-form-item label="名称" required>
+            <n-input v-model:value="editForm.name" placeholder="项目名称" />
+          </n-form-item>
+          <n-form-item label="描述">
+            <n-input v-model:value="editForm.description" type="textarea" placeholder="项目描述" />
+          </n-form-item>
+          <n-form-item label="保留 Runs">
+            <n-input-number v-model:value="editForm.max_runs" :min="1" :max="200" />
+          </n-form-item>
+        </n-form>
+        <n-space justify="end">
+          <n-button @click="showSettings = false">取消</n-button>
+          <n-button type="primary" @click="handleSave">保存</n-button>
+        </n-space>
+      </n-card>
+    </n-modal>
   </div>
 </template>

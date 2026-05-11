@@ -115,7 +115,7 @@ class TestResultDetail(TestResultSummary):
     links: list | None
     parameters: list | None
     status_details: dict | None
-    steps: list["TestStepSummary"] = []
+    steps: list["TestStepDetail"] = []
     attachments: list["TestAttachmentSummary"] = []
 
     model_config = {"from_attributes": True}

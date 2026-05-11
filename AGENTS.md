@@ -2,7 +2,7 @@
 
 ## Overview
 
-基于 FastAPI 的 Allure 3 测试报告平台。用户上传 pytest allure-results，平台自动生成 Allure 3 报告，按项目划分管理，报告为静态 HTML 可通过固定 URL 访问。未来计划接入 Vue3 前端，测试结果结构化存入 PostgreSQL 用于 LLM 分析。
+基于 FastAPI 的 Allure 3 测试报告平台。用户上传 pytest allure-results，平台自动生成 Allure 3 报告，按项目划分管理，报告为静态 HTML 可通过固定 URL 访问。Vue3 前端提供项目管理、报告查看、测试详情等功能。测试结果结构化存入 PostgreSQL 用于 LLM 分析。
 
 ## Tech Stack
 
@@ -14,14 +14,42 @@
 | 数据库 | PostgreSQL 16 |
 | 迁移 | Alembic |
 | 报告生成 | Allure 3 CLI (npx allure awesome) |
-| 前端 (未来) | Vue 3 (独立项目，前后端分离) |
-| 部署 | Docker Compose |
+| 前端 | Vue 3 (TypeScript, 独立项目，前后端分离) |
+| 前端 UI | Naive UI + ECharts |
+| 状态管理 | Pinia |
+| 部署 | Docker Compose (Nginx + FastAPI + PostgreSQL) |
 
 ## Directory Structure
 
 ```
 allure3-s/
-├── docker-compose.yml              # PostgreSQL + Backend
+├── docker-compose.yml              # PostgreSQL + Backend + Frontend
+├── frontend/
+│   ├── Dockerfile                  # 多阶段: node build → nginx serve
+│   ├── nginx.conf                  # SPA fallback + /api/* 反向代理
+│   ├── package.json
+│   ├── vite.config.ts              # Vite + AutoImport + 本地代理
+│   ├── tsconfig.json
+│   └── src/
+│       ├── main.ts                 # Vue3 入口
+│       ├── App.vue                 # Naive ConfigProvider + Router
+│       ├── api/                    # axios 封装: client.ts, projects.ts, reports.ts
+│       ├── stores/                 # Pinia: project.ts, run.ts
+│       ├── router/index.ts         # 6 条路由 (懒加载)
+│       ├── views/
+│       │   ├── ProjectsPage.vue    # 项目卡片网格 + 创建/删除
+│       │   ├── ProjectDetail.vue   # Stats卡片 + 饼图/趋势图 + Run表格
+│       │   ├── RunDetail.vue       # 测试列表 + 状态筛选 + 搜索
+│       │   ├── TestDetail.vue      # 步骤树 + 错误堆栈 + 附件
+│       │   └── ReportViewer.vue    # iframe 嵌入 Allure HTML
+│       ├── components/
+│       │   ├── AppHeader.vue       # 顶部导航
+│       │   ├── StatsCards.vue      # Total/Passed/Failed/Broken/Skipped 卡片
+│       │   ├── StatusTag.vue       # 彩色状态标签
+│       │   ├── PieChart.vue        # 测试结果分布 (ECharts)
+│       │   ├── TrendChart.vue      # 历史趋势 (ECharts)
+│       │   └── StepTree.vue        # 递归步骤树
+│       └── utils/                  # status.ts, format.ts
 ├── backend/
 │   ├── Dockerfile                  # Python 3.12 + Node.js (allure CLI) + uv
 │   ├── pyproject.toml              # uv 项目配置 + 依赖
@@ -47,36 +75,35 @@ allure3-s/
 │       │   └── reports.py          # 上传、报告生成、静态文件服务
 │       └── services/
 │           ├── __init__.py
-│           ├── allure_cli.py       # 调用 allure awesome CLI
+│           ├── allure_cli.py       # 调用 allure awesome CLI + fix_history_urls
 │           ├── result_parser.py    # 解析 allure-results JSON → 写 DB
 │           └── cleanup.py          # 按 max_runs 清理旧 runs
+└── scripts/
+    └── upload.py                   # CLI 上传工具
 ```
 
 ## Development Commands
 
 ```bash
-# 安装依赖
+# ── Backend ──
 cd backend
-uv sync
-
-# 运行服务
-uv run uvicorn app.main:app --reload
-
-# 数据库迁移
-uv run alembic upgrade head
-
-# 自动生成迁移
+uv sync                          # 安装依赖
+uv run uvicorn app.main:app --reload  # 启动 (localhost:8000)
+uv run alembic upgrade head      # 数据库迁移
 uv run alembic revision --autogenerate -m "description"
-
-# 添加/删除依赖
-uv add <package>
+uv add <package>                 # 添加依赖
 uv remove <package>
 
-# Docker Compose 启动
-docker compose up -d
+# ── Frontend ──
+cd frontend
+npm install                      # 安装依赖
+npm run dev                      # 启动 (localhost:5173, proxy /api → :8000)
+npm run build                    # 生产构建 → dist/
 
-# 清理旧 venv 重建
-rm -rf .venv && uv sync
+# ── Docker ──
+docker compose up -d             # 一键启动所有服务 (localhost:80)
+docker compose build backend     # 重建后端
+docker compose build frontend    # 重建前端
 ```
 
 ## Environment Variables
@@ -95,7 +122,8 @@ rm -rf .venv && uv sync
 /data/allure/projects/
   {project_key}/                    # 用户指定，如 "my-app-backend"
     ├── allurerc.mjs                # Allure 配置（historyPath、插件）
-    ├── history.jsonl               # Allure 原生历史记录
+    ├── history.jsonl               # Allure 原生历史记录 (含 url 字段)
+    ├── url_map.json                # allure_report_uuid → run_id 映射 (history 链接用)
     ├── attachments/                # 附件归档
     └── runs/
         ├── {run_id}/
@@ -173,18 +201,79 @@ rm -rf .venv && uv sync
    - 解压 zip → `runs/{run_id}/allure-results/`
    - `result_parser.py`: 解析 `*-result.json` → 写入 PostgreSQL (test_results/steps/attachments)
    - `allure_cli.py`: 调用 `npx allure awesome` 生成静态 HTML
+   - `allure_cli.py`: `fix_history_urls()` — 补全 history.jsonl 中的 url 字段，使 Allure 报告 History 标签可点击跳转到对应历史报告
    - `cleanup.py`: 超出 max_runs 的旧 run 自动删除
 4. 客户端轮询 `GET .../runs/{run_id}` 查状态（status: processing → completed/failed）
 5. 报告通过 `GET .../reports/{run_id}/` 访问
+6. 前端 `RunDetail` 显示 DB 中的结构化数据（📊 详情按钮），`ReportViewer` 嵌入 Allure HTML（📄 报告按钮）
+
+## History URL Fix
+
+Allure 3 的 `history.jsonl` 中每条记录的 `url` 字段默认为空，导致报告中 History 标签链接不可点击。
+
+**解决方案**: `fix_history_urls()` 在每次报告生成后自动维护 `url_map.json` 映射文件，将 Allure 报告的 `uuid` 映射到我们的 `run_id`，然后回填到 `history.jsonl`:
+
+```
+Before: {"uuid":"abc","url":"",...}
+After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
+```
+
+## Frontend
+
+### Pages & Routes
+
+| Path | View | 说明 |
+|------|------|------|
+| `/` | `ProjectsPage` | 项目卡片网格 + 创建/删除 |
+| `/projects/:key` | `ProjectDetail` | Stats卡片 + 饼图/趋势图 + Run表格（📊详情 📄报告 按钮）|
+| `/projects/:key/runs/:id` | `RunDetail` | 测试列表 + 状态筛选 + 关键词搜索 |
+| `/projects/:key/runs/:id/tests/:tid` | `TestDetail` | 步骤树 + 错误堆栈 + 附件列表 |
+| `/projects/:key/reports/latest` | `ReportViewer` | iframe 嵌入最新 Allure HTML |
+| `/projects/:key/reports/:id` | `ReportViewer` | iframe 嵌入历史报告 |
+
+### 双入口设计
+
+前端明确区分两个数据来源：
+
+| 按钮 | 数据来源 | 行为 |
+|------|----------|------|
+| 📊 详情 | PostgreSQL 结构化数据 | `router.push` → RunDetail 页面 |
+| 📄 报告 | Allure 静态 HTML | `window.open` 新标签 / iframe 嵌入 |
+
+## Deployment Architecture
+
+```
+Browser :80
+    │
+    ▼
+┌─ frontend (nginx) ────────────┐
+│  /              → dist/       │  Vue SPA (static HTML)
+│  /api/*         → backend     │  API proxy
+│  /docs          → backend     │  Swagger proxy
+│  /openapi.json  → backend     │
+└───────────┬───────────────────┘
+            │
+            ▼
+┌─ backend :8000 (internal) ────┐
+│  FastAPI + async SQLAlchemy   │
+│  + Node.js (allure CLI)       │
+└───────────┬───────────────────┘
+            │
+            ▼
+┌─ db :5432 (internal) ─────────┐
+│  PostgreSQL 16                │
+└───────────────────────────────┘
+```
 
 ## Key Architectural Decisions
 
 1. **Allure CLI 调用方式**: Python 后端通过 `subprocess` 调用 `npx allure awesome`，Allure 3 是 TypeScript 工具，无 Python API
-2. **History**: 使用 Allure 原生 `history.jsonl` 机制，不存数据库。每个项目一个 history.jsonl，Allure CLI 自动维护
+2. **History**: 使用 Allure 原生 `history.jsonl` 机制，不存数据库。每个项目一个 history.jsonl，Allure CLI 自动维护。`fix_history_urls()` 后处理补全 url 使历史链接可用
 3. **报告静态服务**: 通过自定义路由 + FileResponse 直接映射文件系统路径，不使用 `allure open`
 4. **数据双存储**: 原始文件（报告 HTML + JSON + 附件）存文件系统，结构化数据（test_results/steps）存 PostgreSQL，后者用于未来 LLM 分析
 5. **清理策略**: 每项目最多保留 N 个 run（默认 20），history.jsonl 不限制
 6. **前端分离**: Vue3 前端作为独立项目，通过 CORS 调用 REST API
+7. **Nginx 反向代理**: 统一入口 `:80`，前端 SPA + /api/* 代理到 FastAPI，解决跨域和部署复杂度
 
 ## Project Key Convention
 

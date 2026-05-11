@@ -3,16 +3,18 @@ import logging
 import shutil
 import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTasks
 
 from app.config import settings
 from app.database import get_db
-from app.models import Project, Run, TestResult
+from app.models import Project, Run, TestResult, TestStep, TestAttachment
 from app.schemas import (
     RunResponse,
     RunDetailResponse,
@@ -155,13 +157,45 @@ async def get_test_result(
     run = await _get_run_or_404(project_key, run_id, db)
 
     result = await db.execute(
-        select(TestResult).where(TestResult.id == test_result_id, TestResult.run_id == run.id)
+        select(TestResult)
+        .where(TestResult.id == test_result_id, TestResult.run_id == run.id)
+        .options(
+            selectinload(TestResult.steps).selectinload(TestStep.children).selectinload(TestStep.children),
+            selectinload(TestResult.steps).selectinload(TestStep.attachments),
+            selectinload(TestResult.attachments),
+        )
     )
-    tr = result.scalar_one_or_none()
+    tr = result.unique().scalar_one_or_none()
     if not tr:
         raise HTTPException(status_code=404, detail="Test result not found")
 
-    return TestResultDetail.model_validate(tr)
+    return _to_test_result_detail(tr)
+
+
+# ── Attachment download ──────────────────────────────────────────────
+
+@router.get("/{project_key}/attachments/{attachment_id}")
+async def download_attachment(
+    project_key: str,
+    attachment_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(TestAttachment).where(TestAttachment.id == attachment_id)
+    )
+    att = result.scalar_one_or_none()
+    if not att or not att.file_path:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    file = Path(att.file_path)
+    if not file.exists():
+        raise HTTPException(status_code=404, detail="Attachment file not found on disk")
+
+    return FileResponse(
+        file,
+        filename=att.name or att.source,
+        media_type=att.type or "application/octet-stream",
+    )
 
 
 # ── Static report serving ─────────────────────────────────────────────
@@ -284,3 +318,53 @@ def _flatten_results_dir(results_dir):
             if not target.exists():
                 shutil.move(str(item), str(target))
         nested.rmdir()
+
+
+def _to_step_detail(step: TestStep):
+    from app.schemas import TestStepDetail, TestAttachmentSummary
+    children = [_to_step_detail(c) for c in (step.children or [])]
+    attachments = [
+        TestAttachmentSummary(id=a.id, name=a.name, source=a.source, type=a.type, size=a.size)
+        for a in (step.attachments or [])
+    ]
+    return TestStepDetail(
+        id=step.id,
+        name=step.name,
+        status=step.status,
+        duration_ms=step.duration_ms,
+        stage=step.stage,
+        start_time=step.start_time,
+        stop_time=step.stop_time,
+        status_details=step.status_details,
+        children=children,
+        attachments=attachments,
+    )
+
+
+def _to_test_result_detail(tr: TestResult):
+    from app.schemas import TestResultDetail, TestAttachmentSummary
+    steps = [_to_step_detail(s) for s in (tr.steps or []) if s.parent_step_id is None]
+    attachments = [
+        TestAttachmentSummary(id=a.id, name=a.name, source=a.source, type=a.type, size=a.size)
+        for a in (tr.attachments or [])
+    ]
+    return TestResultDetail(
+        id=tr.id,
+        uuid=tr.uuid,
+        history_id=tr.history_id,
+        full_name=tr.full_name,
+        name=tr.name,
+        description=tr.description,
+        status=tr.status,
+        stage=tr.stage,
+        start_time=tr.start_time,
+        stop_time=tr.stop_time,
+        duration_ms=tr.duration_ms,
+        test_case_id=tr.test_case_id,
+        labels=tr.labels,
+        links=tr.links,
+        parameters=tr.parameters,
+        status_details=tr.status_details,
+        steps=steps,
+        attachments=attachments,
+    )

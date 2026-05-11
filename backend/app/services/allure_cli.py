@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 from app.config import settings
@@ -70,4 +71,60 @@ async def generate_report(project_key: str, run_id: str, project_name: str) -> s
     logger.info("Allure generation succeeded for run %s", run_id)
     logger.debug("stdout: %s", stdout.decode())
 
+    await fix_history_urls(project_key, run_id)
+
     return str(report_dir)
+
+
+def _load_url_map(project_key: str) -> dict[str, str]:
+    """Load {allure_uuid → run_id} mapping file."""
+    map_path = settings.project_dir(project_key) / "url_map.json"
+    if map_path.exists():
+        return json.loads(map_path.read_text())
+    return {}
+
+
+def _save_url_map(project_key: str, data: dict[str, str]) -> None:
+    map_path = settings.project_dir(project_key) / "url_map.json"
+    map_path.write_text(json.dumps(data, indent=2))
+
+
+async def fix_history_urls(project_key: str, run_id: str) -> None:
+    """After a report is generated, fix the url field in history.jsonl entries
+    so that Allure's History tab can link to previous reports."""
+    history_path = settings.history_path(project_key)
+    if not history_path.exists():
+        return
+
+    # Read all history lines
+    lines = history_path.read_text().strip().splitlines()
+    if not lines:
+        return
+
+    # Build entries list
+    entries: list[dict] = []
+    for line in lines:
+        if line.strip():
+            entries.append(json.loads(line))
+
+    # Find our run's entry (last one appended by allure)
+    if entries:
+        latest = entries[-1]
+        allure_uuid = latest.get("uuid", "")
+        if allure_uuid:
+            url_map = _load_url_map(project_key)
+            url_map[allure_uuid] = run_id
+            _save_url_map(project_key, url_map)
+
+    # Re-read map and fix all known entries
+    url_map = _load_url_map(project_key)
+    changed = False
+    for entry in entries:
+        entry_uuid = entry.get("uuid", "")
+        if entry_uuid in url_map and not entry.get("url"):
+            entry["url"] = f"/api/projects/{project_key}/reports/{url_map[entry_uuid]}/"
+            changed = True
+
+    if changed:
+        history_path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+        logger.info("Fixed history urls for project %s, run %s", project_key, run_id)
