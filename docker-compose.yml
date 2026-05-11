@@ -7,13 +7,14 @@ services:
       POSTGRES_DB: allure3
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U allure -d allure3"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
     environment:
       ALLURE_DATABASE_URL: postgresql+asyncpg://allure:allure@db:5432/allure3
       ALLURE_DATABASE_URL_SYNC: postgresql://allure:allure@db:5432/allure3
@@ -21,7 +22,15 @@ services:
     volumes:
       - allure_data:/data/allure
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
