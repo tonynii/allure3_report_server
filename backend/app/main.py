@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app.models import Base
-from app.routers import projects, reports
+from app.routers import projects, reports, dashboard
 
 
 @asynccontextmanager
@@ -30,6 +30,7 @@ app.add_middleware(
 
 app.include_router(projects.router)
 app.include_router(reports.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/api/health")

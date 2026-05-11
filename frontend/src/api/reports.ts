@@ -75,3 +75,6 @@ export const listRuns = (key: string) => client.get<Run[]>(`/api/projects/${key}
 export const getRun = (key: string, id: string) => client.get<RunDetail>(`/api/projects/${key}/runs/${id}`)
 export const getTestResult = (key: string, runId: string, testId: string) =>
   client.get<TestResultDetail>(`/api/projects/${key}/runs/${runId}/tests/${testId}`)
+
+export const deleteRun = (key: string, id: string) =>
+  client.delete(`/api/projects/${key}/runs/${id}`)

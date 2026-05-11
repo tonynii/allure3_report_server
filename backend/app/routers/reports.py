@@ -198,6 +198,29 @@ async def download_attachment(
     )
 
 
+# ── Run deletion ──────────────────────────────────────────────────────
+
+@router.delete("/{project_key}/runs/{run_id}", status_code=204)
+async def delete_run(project_key: str, run_id: str, db: AsyncSession = Depends(get_db)):
+    run = await _get_run_or_404(project_key, run_id, db)
+    await db.delete(run)
+    await db.commit()
+
+    import json as _json
+    run_dir = settings.run_dir(project_key, run_id)
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+
+    url_map_path = settings.project_dir(project_key) / "url_map.json"
+    if url_map_path.exists():
+        mapping = _json.loads(url_map_path.read_text())
+        to_remove = [k for k, v in mapping.items() if v == run_id]
+        if to_remove:
+            for k in to_remove:
+                del mapping[k]
+            url_map_path.write_text(_json.dumps(mapping, indent=2))
+
+
 # ── Static report serving ─────────────────────────────────────────────
 
 @router.get("/{project_key}/reports/latest/{path:path}")

@@ -5,6 +5,11 @@ const router = createRouter({
   routes: [
     {
       path: '/',
+      name: 'dashboard',
+      component: () => import('../views/DashboardPage.vue'),
+    },
+    {
+      path: '/projects',
       name: 'projects',
       component: () => import('../views/ProjectsPage.vue'),
     },
@@ -32,6 +37,16 @@ const router = createRouter({
       path: '/projects/:key/reports/:runId',
       name: 'report-run',
       component: () => import('../views/ReportViewer.vue'),
+    },
+    {
+      path: '/tools',
+      name: 'tools',
+      component: () => import('../views/ToolsPage.vue'),
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/SettingsPage.vue'),
     },
   ],
 })

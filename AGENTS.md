@@ -224,12 +224,24 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 
 | Path | View | 说明 |
 |------|------|------|
-| `/` | `ProjectsPage` | 项目卡片网格 + 创建/删除 |
-| `/projects/:key` | `ProjectDetail` | Stats卡片 + 饼图/趋势图 + Run表格（📊详情 📄报告 按钮）|
-| `/projects/:key/runs/:id` | `RunDetail` | 测试列表 + 状态筛选 + 关键词搜索 |
-| `/projects/:key/runs/:id/tests/:tid` | `TestDetail` | 步骤树 + 错误堆栈 + 附件列表 |
+| `/` | `DashboardPage` | 看板主页：项目数/Runs/通过率统计 + 项目概况卡片 + 最近运行列表 |
+| `/projects` | `ProjectsPage` | 项目卡片网格 + 创建/删除 |
+| `/projects/:key` | `ProjectDetail` | Stats卡片 + 饼图/趋势图 + Run表格（📊详情 📄报告 🗑删除 按钮）|
+| `/projects/:key/runs/:id` | `RunDetail` | 测试列表 + 状态筛选 + 关键词搜索 + 头部 🗑删除 |
+| `/projects/:key/runs/:id/tests/:tid` | `TestDetail` | 步骤树 + 错误堆栈 + 附件下载 |
 | `/projects/:key/reports/latest` | `ReportViewer` | iframe 嵌入最新 Allure HTML |
 | `/projects/:key/reports/:id` | `ReportViewer` | iframe 嵌入历史报告 |
+| `/tools` | `ToolsPage` | 上传工具：选择项目 + 拖拽上传 allure-results.zip + 状态轮询 |
+| `/settings` | `SettingsPage` | 全局信息 + 项目概况表（存储空间/Runs数）+ ✏️编辑 🗑删除 |
+
+### 侧边栏菜单
+
+| 菜单 | 路由 | 说明 |
+|------|------|------|
+| 📊 看板 | `/` | Dashboard 主页 |
+| 📁 项目 | `/projects` | 项目列表 |
+| 🔧 工具 | `/tools` | 上传工具 |
+| ⚙️ 配置 | `/settings` | 全局信息 + 项目管理 |
 
 ### 双入口设计
 
@@ -239,6 +251,15 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 |------|----------|------|
 | 📊 详情 | PostgreSQL 结构化数据 | `router.push` → RunDetail 页面 |
 | 📄 报告 | Allure 静态 HTML | `window.open` 新标签 / iframe 嵌入 |
+
+### 删除功能
+
+| 位置 | 删除对象 | 确认方式 |
+|------|---------|----------|
+| ProjectsPage 项目卡片 | 项目 | `n-popconfirm` |
+| ProjectDetail Run 表格 | 单个 Run | `useDialog().warning()` 模态框 |
+| RunDetail 头部 | 当前 Run | `n-popconfirm` |
+| SettingsPage 项目表 | 项目 | `useDialog().warning()` 模态框 |
 
 ## Deployment Architecture
 

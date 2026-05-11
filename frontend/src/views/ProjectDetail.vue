@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { h, computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import { useProjectStore } from '../stores/project'
 import { useRunStore } from '../stores/run'
-import { uploadResults } from '../api/reports'
+import { uploadResults, deleteRun } from '../api/reports'
 import { updateProject } from '../api/projects'
 import StatsCards from '../components/StatsCards.vue'
 import PieChart from '../components/PieChart.vue'
@@ -17,6 +17,7 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const runStore = useRunStore()
 const message = useMessage()
+const dialog = useDialog()
 const uploading = ref(false)
 const showSettings = ref(false)
 const editForm = ref({ name: '', description: '', max_runs: 20 })
@@ -53,6 +54,24 @@ async function handleUpload(data: { file: { file: File | null } }) {
 
 function goToRun(id: string) {
   router.push(`/projects/${key.value}/runs/${id}`)
+}
+
+function handleDeleteRun(runId: string) {
+  dialog.warning({
+    title: '确认删除',
+    content: '确定删除此报告？此操作不可撤销',
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteRun(key.value, runId)
+        message.success('已删除')
+        await runStore.fetchRuns(key.value)
+      } catch (err: any) {
+        message.error(err.response?.data?.detail || '删除失败')
+      }
+    },
+  })
 }
 
 function viewReport(runId?: string) {
@@ -97,7 +116,7 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
-    width: 160,
+    width: 200,
     render: (row: any) =>
       h('n-space', { size: 'small' }, [
         h('n-button', {
@@ -110,6 +129,10 @@ const columns = [
               onClick: (e: Event) => { e.stopPropagation(); viewReport(row.id) },
             }, { default: () => '📄 报告' })
           : h('span', {}, '-'),
+        h('n-button', {
+          size: 'small', ghost: true, type: 'error',
+          onClick: (e: Event) => { e.stopPropagation(); handleDeleteRun(row.id) },
+        }, { default: () => '🗑 删除' }),
       ]),
   },
 ]
@@ -118,7 +141,7 @@ const columns = [
 <template>
   <div v-if="projectStore.current">
     <n-space align="center" style="margin-bottom: 24px">
-      <n-button text @click="router.push('/')">← 返回</n-button>
+      <n-button text @click="router.push('/projects')">← 返回</n-button>
       <n-h2 style="margin: 0">{{ projectStore.current.name }}</n-h2>
       <n-text depth="3">({{ projectStore.current.key }})</n-text>
 
@@ -142,6 +165,7 @@ const columns = [
     <n-card title="Run 历史" size="small">
       <n-data-table :columns="columns" :data="runStore.runs" :bordered="false"
         :row-props="(row: any) => ({ style: 'cursor: pointer', onClick: () => goToRun(row.id) })"
+        :row-class-name="(_: any, i: number) => i % 2 ? 'row-alt' : ''"
         :pagination="{ pageSize: 10 }" />
     </n-card>
     <n-modal v-model:show="showSettings" title="⚙️ 项目设置">
@@ -165,3 +189,7 @@ const columns = [
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+:deep(.row-alt td) { background: #fafafa !important; }
+</style>
