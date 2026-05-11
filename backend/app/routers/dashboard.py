@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,6 +118,22 @@ def _format_bytes(n: int) -> str:
         return f"{n / (1024 * 1024):.1f} MB"
 
 
+_allure_version: str | None = None
+
+
+def _get_allure_version() -> str:
+    global _allure_version
+    if _allure_version is not None:
+        return _allure_version
+    try:
+        import subprocess
+        result = subprocess.run(["npx", "allure", "--version"], capture_output=True, text=True, timeout=10)
+        _allure_version = result.stdout.strip() or "unknown"
+    except Exception:
+        _allure_version = "unknown"
+    return _allure_version
+
+
 @router.get("/settings")
 async def get_settings(db: AsyncSession = Depends(get_db)):
     proj_res = await db.execute(select(Project).order_by(Project.created_at.desc()))
@@ -146,5 +163,6 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     return {
         "data_dir": settings.data_dir,
         "default_max_runs": settings.max_runs_default,
+        "allure_version": _get_allure_version(),
         "projects": project_list,
     }

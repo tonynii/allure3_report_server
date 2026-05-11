@@ -95,5 +95,14 @@ async function handleUpload(data: { file: { file: File | null } }) {
         {{ uploadStatus }}
       </n-alert>
     </n-card>
+
+    <n-card title="📊 横向对比" size="small" style="max-width: 640px; margin-top: 16px">
+      <n-text depth="3" style="margin-bottom: 12px; display: block">
+        同时对比多个项目/分支/历史 Run 的测试结果，发现回归、共同失败、不稳定测试
+      </n-text>
+      <n-button type="primary" @click="router.push('/tools/compare')">
+        打开横向对比
+      </n-button>
+    </n-card>
   </div>
 </template>

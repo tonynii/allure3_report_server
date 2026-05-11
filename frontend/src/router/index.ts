@@ -44,6 +44,11 @@ const router = createRouter({
       component: () => import('../views/ToolsPage.vue'),
     },
     {
+      path: '/tools/compare',
+      name: 'compare',
+      component: () => import('../views/ComparePage.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsPage.vue'),

@@ -94,6 +94,7 @@ const columns = [
           <n-card size="small" title="全局信息">
             <n-descriptions :columns="1" label-placement="left">
               <n-descriptions-item label="数据目录">{{ data?.data_dir || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="Allure 版本">{{ data?.allure_version || '-' }}</n-descriptions-item>
               <n-descriptions-item label="默认保留">{{ data?.default_max_runs || '-' }} runs</n-descriptions-item>
             </n-descriptions>
           </n-card>

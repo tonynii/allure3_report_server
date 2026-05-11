@@ -33,17 +33,21 @@ allure3-s/
 │   └── src/
 │       ├── main.ts                 # Vue3 入口
 │       ├── App.vue                 # Naive ConfigProvider + Router
-│       ├── api/                    # axios 封装: client.ts, projects.ts, reports.ts
-│       ├── stores/                 # Pinia: project.ts, run.ts
-│       ├── router/index.ts         # 6 条路由 (懒加载)
+│       ├── api/                    # axios 封装: client.ts, projects.ts, reports.ts, dashboard.ts, compare.ts
+│       ├── stores/                 # Pinia: project.ts, run.ts, dashboard.ts
+│       ├── router/index.ts         # 10 条路由 (懒加载)
 │       ├── views/
+│       │   ├── DashboardPage.vue   # 看板主页: 统计 + 项目概况 + 最近运行
 │       │   ├── ProjectsPage.vue    # 项目卡片网格 + 创建/删除
 │       │   ├── ProjectDetail.vue   # Stats卡片 + 饼图/趋势图 + Run表格
-│       │   ├── RunDetail.vue       # 测试列表 + 状态筛选 + 搜索
-│       │   ├── TestDetail.vue      # 步骤树 + 错误堆栈 + 附件
-│       │   └── ReportViewer.vue    # iframe 嵌入 Allure HTML
+│       │   ├── RunDetail.vue       # 测试列表 + 状态筛选 + 搜索 + 删除
+│       │   ├── TestDetail.vue      # 步骤树 + 错误堆栈 + 附件下载
+│       │   ├── ReportViewer.vue    # iframe 嵌入 Allure HTML
+│       │   ├── ToolsPage.vue       # 上传工具 + 横向对比入口
+│       │   ├── ComparePage.vue     # 多 Run 横向对比矩阵
+│       │   └── SettingsPage.vue    # 全局信息 + 项目概况编辑/删除
 │       ├── components/
-│       │   ├── AppHeader.vue       # 顶部导航
+│       │   ├── AppSidebar.vue      # 侧边栏菜单 (看板/项目/工具/配置)
 │       │   ├── StatsCards.vue      # Total/Passed/Failed/Broken/Skipped 卡片
 │       │   ├── StatusTag.vue       # 彩色状态标签
 │       │   ├── PieChart.vue        # 测试结果分布 (ECharts)
@@ -72,7 +76,9 @@ allure3-s/
 │       ├── routers/
 │       │   ├── __init__.py
 │       │   ├── projects.py         # 项目 CRUD
-│       │   └── reports.py          # 上传、报告生成、静态文件服务
+│       │   ├── reports.py          # 上传、报告生成、静态文件服务、删除
+│       │   ├── dashboard.py        # 看板聚合 + 配置信息
+│       │   └── compare.py          # 多 Run 横向对比
 │       └── services/
 │           ├── __init__.py
 │           ├── allure_cli.py       # 调用 allure awesome CLI + fix_history_urls
@@ -184,9 +190,18 @@ docker compose build frontend    # 重建前端
 | POST | /api/projects/{key}/runs | 上传 allure-results.zip → 202 |
 | GET | /api/projects/{key}/runs | 所有 runs 列表 |
 | GET | /api/projects/{key}/runs/{id} | run 详情 + 统计 |
+| DELETE | /api/projects/{key}/runs/{id} | 删除单个 run |
 | GET | /api/projects/{key}/runs/{id}/tests/{tid} | 单个 test result 详情 |
 | GET | /api/projects/{key}/reports/latest/{path} | 最新报告静态文件 |
 | GET | /api/projects/{key}/reports/{id}/{path} | 历史报告静态文件 |
+| GET | /api/projects/{key}/attachments/{aid} | 下载附件文件 |
+
+### 看板 & 对比
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | /api/dashboard | 看板聚合数据 (项目数/Runs/通过率/最近运行) |
+| GET | /api/settings | 全局配置 + Allure 版本 + 项目概况 (存储空间) |
+| POST | /api/compare | 多 Run 横向对比 (按 historyId 匹配) |
 
 ### 其他
 | Method | Path | 说明 |
@@ -232,7 +247,8 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 | `/projects/:key/reports/latest` | `ReportViewer` | iframe 嵌入最新 Allure HTML |
 | `/projects/:key/reports/:id` | `ReportViewer` | iframe 嵌入历史报告 |
 | `/tools` | `ToolsPage` | 上传工具：选择项目 + 拖拽上传 allure-results.zip + 状态轮询 |
-| `/settings` | `SettingsPage` | 全局信息 + 项目概况表（存储空间/Runs数）+ ✏️编辑 🗑删除 |
+| `/tools/compare` | `ComparePage` | 多 Run 横向对比矩阵 (按 historyId 匹配，分类 all_pass/all_fail/mixed/flaky) |
+| `/settings` | `SettingsPage` | 全局信息 (Allure 版本/数据目录) + 项目概况表（存储空间/Runs数）+ ✏️编辑 🗑删除 |
 
 ### 侧边栏菜单
 
@@ -240,7 +256,7 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 |------|------|------|
 | 📊 看板 | `/` | Dashboard 主页 |
 | 📁 项目 | `/projects` | 项目列表 |
-| 🔧 工具 | `/tools` | 上传工具 |
+| 🔧 工具 | `/tools` | 上传工具 + 横向对比 |
 | ⚙️ 配置 | `/settings` | 全局信息 + 项目管理 |
 
 ### 双入口设计
@@ -260,6 +276,20 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 | ProjectDetail Run 表格 | 单个 Run | `useDialog().warning()` 模态框 |
 | RunDetail 头部 | 当前 Run | `n-popconfirm` |
 | SettingsPage 项目表 | 项目 | `useDialog().warning()` 模态框 |
+
+### 横向对比
+
+多 Run 横向对比 (`POST /api/compare`)，入口：🔧 工具 → 📊 横向对比
+
+- 支持 2-N 个 Run 同时对比（同项目/跨项目/跨 branch）
+- 按 `historyId` 匹配同一测试在不同 Run 中的结果
+- 分类: all_pass / all_fail / mixed / flaky
+- 关键词搜索 + "仅显示有变化" 过滤
+- 点击行弹窗展示详情（错误信息、Labels、每个 Run 的状态和耗时）
+
+### 样式
+
+所有数据表格支持奇偶行交替灰白背景 (`:row-class-name` + `scoped` `:deep`)。
 
 ## Deployment Architecture
 
@@ -295,6 +325,7 @@ Browser :80
 5. **清理策略**: 每项目最多保留 N 个 run（默认 20），history.jsonl 不限制
 6. **前端分离**: Vue3 前端作为独立项目，通过 CORS 调用 REST API
 7. **Nginx 反向代理**: 统一入口 `:80`，前端 SPA + /api/* 代理到 FastAPI，解决跨域和部署复杂度
+8. **横向对比**: 通过 historyId 跨 Run/跨项目匹配同一测试，支持多维度对比分析
 
 ## Project Key Convention
 
