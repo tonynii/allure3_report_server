@@ -21,7 +21,12 @@ export default {{
     awesome: {{
       options: {{
         singleFile: false,
-        reportLanguage: "en",
+        reportLanguage: "{settings.report_language}",
+        groupBy: [
+          ["epic", "feature", "story"],
+          ["parentSuite", "suite", "subSuite"],
+          ["package", "class", "method"],
+        ],
       }}
     }}
   }}

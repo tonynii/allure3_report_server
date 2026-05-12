@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url_sync: str = "postgresql://allure:allure@localhost:5432/allure3"
     data_dir: str = "/data/allure"
     max_runs_default: int = 20
+    report_language: str = "zh"
     host: str = "0.0.0.0"
     port: int = 8000
 

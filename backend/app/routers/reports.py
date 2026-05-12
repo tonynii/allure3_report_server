@@ -133,6 +133,7 @@ async def get_run(
         unknown=run.unknown,
         duration_ms=run.duration_ms,
         error_message=run.error_message,
+        environment=run.environment,
         created_at=run.created_at,
         completed_at=run.completed_at,
     )
@@ -147,169 +148,11 @@ async def get_run(
     return detail
 
 
-@router.get("/{project_key}/runs/{run_id}/tests/{test_result_id}", response_model=TestResultDetail)
-async def get_test_result(
-    project_key: str,
-    run_id: str,
-    test_result_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    run = await _get_run_or_404(project_key, run_id, db)
-
-    result = await db.execute(
-        select(TestResult)
-        .where(TestResult.id == test_result_id, TestResult.run_id == run.id)
-        .options(
-            selectinload(TestResult.steps).selectinload(TestStep.children).selectinload(TestStep.children),
-            selectinload(TestResult.steps).selectinload(TestStep.attachments),
-            selectinload(TestResult.attachments),
-        )
-    )
-    tr = result.unique().scalar_one_or_none()
-    if not tr:
-        raise HTTPException(status_code=404, detail="Test result not found")
-
-    return _to_test_result_detail(tr)
-
-
-# ── Attachment download ──────────────────────────────────────────────
-
-@router.get("/{project_key}/attachments/{attachment_id}")
-async def download_attachment(
-    project_key: str,
-    attachment_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(TestAttachment).where(TestAttachment.id == attachment_id)
-    )
-    att = result.scalar_one_or_none()
-    if not att or not att.file_path:
-        raise HTTPException(status_code=404, detail="Attachment not found")
-
-    file = Path(att.file_path)
-    if not file.exists():
-        raise HTTPException(status_code=404, detail="Attachment file not found on disk")
-
-    return FileResponse(
-        file,
-        filename=att.name or att.source,
-        media_type=att.type or "application/octet-stream",
-    )
-
-
-# ── Run deletion ──────────────────────────────────────────────────────
-
-@router.delete("/{project_key}/runs/{run_id}", status_code=204)
-async def delete_run(project_key: str, run_id: str, db: AsyncSession = Depends(get_db)):
-    run = await _get_run_or_404(project_key, run_id, db)
-    await db.delete(run)
-    await db.commit()
-
-    import json as _json
-    run_dir = settings.run_dir(project_key, run_id)
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
-
-    url_map_path = settings.project_dir(project_key) / "url_map.json"
-    if url_map_path.exists():
-        mapping = _json.loads(url_map_path.read_text())
-        to_remove = [k for k, v in mapping.items() if v == run_id]
-        if to_remove:
-            for k in to_remove:
-                del mapping[k]
-            url_map_path.write_text(_json.dumps(mapping, indent=2))
-
-
-# ── Static report serving ─────────────────────────────────────────────
-
-@router.get("/{project_key}/reports/latest/{path:path}")
-async def serve_latest_report(project_key: str, path: str, db: AsyncSession = Depends(get_db)):
-    """Serve the latest completed report for a project."""
-    project = await db.get(Project, project_key)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    result = await db.execute(
-        select(Run)
-        .where(Run.project_key == project_key, Run.status == "completed")
-        .order_by(Run.created_at.desc())
-        .limit(1)
-    )
-    latest_run = result.scalar_one_or_none()
-    if not latest_run:
-        raise HTTPException(status_code=404, detail="No completed reports yet")
-
-    return await _serve_report_file(project_key, str(latest_run.id), path)
-
-
-@router.get("/{project_key}/reports/{run_id}/{path:path}")
-async def serve_report(project_key: str, run_id: str, path: str, db: AsyncSession = Depends(get_db)):
-    """Serve a specific run's report."""
-    run = await _get_run_or_404(project_key, run_id, db)
-    if run.status != "completed":
-        raise HTTPException(status_code=404, detail="Report not yet generated")
-    return await _serve_report_file(project_key, run_id, path)
-
-
-async def _serve_report_file(project_key: str, run_id: str, path: str):
-    report_dir = settings.report_dir(project_key, run_id)
-
-    # If path is empty, serve index.html
-    target = report_dir / (path or "index.html")
-    if not target.exists():
-        # Try index.html fallback for SPA-style navigation
-        target = report_dir / "index.html"
-        if not target.exists():
-            raise HTTPException(status_code=404, detail="File not found")
-
-    return FileResponse(target)
-
-
-# ── Internal helpers ───────────────────────────────────────────────────
-
 async def _get_run_or_404(project_key: str, run_id: str, db: AsyncSession) -> Run:
     run = await db.get(Run, run_id)
     if not run or run.project_key != project_key:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
-
-
-async def _process_run(run_id: str, project_key: str, project_name: str) -> None:
-    """Background task: parse results, generate report, cleanup."""
-    from app.database import async_session
-
-    async with async_session() as db:
-        run = await db.get(Run, run_id)
-        if not run:
-            return
-
-        try:
-            await parse_results(run, db)
-            await db.commit()
-
-            await generate_report(project_key, run_id, project_name)
-
-            run.status = "completed"
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            await _cleanup_if_needed(project_key)
-
-        except Exception as e:
-            logger.exception("Failed to process run %s: %s", run_id, e)
-            run.status = "failed"
-            run.error_message = str(e)[:1000]
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-
-async def _cleanup_if_needed(project_key: str):
-    from app.database import async_session
-    async with async_session() as cleanup_db:
-        project = await cleanup_db.get(Project, project_key)
-        if project:
-            await cleanup_old_runs(project, cleanup_db)
 
 
 def _to_run_response(run: Run) -> RunResponse:
@@ -327,6 +170,7 @@ def _to_run_response(run: Run) -> RunResponse:
         unknown=run.unknown,
         duration_ms=run.duration_ms,
         error_message=run.error_message,
+        environment=run.environment,
         created_at=run.created_at,
         completed_at=run.completed_at,
     )
@@ -391,3 +235,147 @@ def _to_test_result_detail(tr: TestResult):
         steps=steps,
         attachments=attachments,
     )
+
+
+@router.get("/{project_key}/runs/{run_id}/tests/{test_result_id}", response_model=TestResultDetail)
+async def get_test_result(
+    project_key: str,
+    run_id: str,
+    test_result_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    run = await _get_run_or_404(project_key, run_id, db)
+
+    result = await db.execute(
+        select(TestResult)
+        .where(TestResult.id == test_result_id, TestResult.run_id == run.id)
+        .options(
+            selectinload(TestResult.steps).selectinload(TestStep.children).selectinload(TestStep.children),
+            selectinload(TestResult.steps).selectinload(TestStep.attachments),
+            selectinload(TestResult.attachments),
+        )
+    )
+    tr = result.unique().scalar_one_or_none()
+    if not tr:
+        raise HTTPException(status_code=404, detail="Test result not found")
+
+    return _to_test_result_detail(tr)
+
+
+@router.get("/{project_key}/attachments/{attachment_id}")
+async def download_attachment(
+    project_key: str,
+    attachment_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(TestAttachment).where(TestAttachment.id == attachment_id)
+    )
+    att = result.scalar_one_or_none()
+    if not att or not att.file_path:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    file = Path(att.file_path)
+    if not file.exists():
+        raise HTTPException(status_code=404, detail="Attachment file not found on disk")
+
+    return FileResponse(
+        file,
+        filename=att.name or att.source,
+        media_type=att.type or "application/octet-stream",
+    )
+
+
+@router.delete("/{project_key}/runs/{run_id}", status_code=204)
+async def delete_run(project_key: str, run_id: str, db: AsyncSession = Depends(get_db)):
+    run = await _get_run_or_404(project_key, run_id, db)
+    await db.delete(run)
+    await db.commit()
+
+    import json as _json
+    run_dir = settings.run_dir(project_key, run_id)
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+
+    url_map_path = settings.project_dir(project_key) / "url_map.json"
+    if url_map_path.exists():
+        mapping = _json.loads(url_map_path.read_text())
+        to_remove = [k for k, v in mapping.items() if v == run_id]
+        if to_remove:
+            for k in to_remove:
+                del mapping[k]
+            url_map_path.write_text(_json.dumps(mapping, indent=2))
+
+
+@router.get("/{project_key}/reports/latest/{path:path}")
+async def serve_latest_report(project_key: str, path: str, db: AsyncSession = Depends(get_db)):
+    project = await db.get(Project, project_key)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await db.execute(
+        select(Run)
+        .where(Run.project_key == project_key, Run.status == "completed")
+        .order_by(Run.created_at.desc())
+        .limit(1)
+    )
+    latest_run = result.scalar_one_or_none()
+    if not latest_run:
+        raise HTTPException(status_code=404, detail="No completed reports yet")
+
+    return await _serve_report_file(project_key, str(latest_run.id), path)
+
+
+@router.get("/{project_key}/reports/{run_id}/{path:path}")
+async def serve_report(project_key: str, run_id: str, path: str, db: AsyncSession = Depends(get_db)):
+    run = await _get_run_or_404(project_key, run_id, db)
+    if run.status != "completed":
+        raise HTTPException(status_code=404, detail="Report not yet generated")
+    return await _serve_report_file(project_key, run_id, path)
+
+
+async def _serve_report_file(project_key: str, run_id: str, path: str):
+    report_dir = settings.report_dir(project_key, run_id)
+
+    target = report_dir / (path or "index.html")
+    if not target.exists():
+        target = report_dir / "index.html"
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(target)
+
+
+async def _process_run(run_id: str, project_key: str, project_name: str) -> None:
+    from app.database import async_session
+
+    async with async_session() as db:
+        run = await db.get(Run, run_id)
+        if not run:
+            return
+
+        try:
+            await parse_results(run, db)
+            await db.commit()
+            await generate_report(project_key, run_id, project_name)
+
+            run.status = "completed"
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            await _cleanup_if_needed(project_key)
+
+        except Exception as e:
+            logger.exception("Failed to process run %s: %s", run_id, e)
+            run.status = "failed"
+            run.error_message = str(e)[:1000]
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+
+async def _cleanup_if_needed(project_key: str):
+    from app.database import async_session
+    async with async_session() as cleanup_db:
+        project = await cleanup_db.get(Project, project_key)
+        if project:
+            await cleanup_old_runs(project, cleanup_db)

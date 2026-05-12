@@ -64,6 +64,7 @@ class RunResponse(BaseModel):
     unknown: int
     duration_ms: int | None
     error_message: str | None
+    environment: list | None = None
     created_at: datetime
     completed_at: datetime | None
 
@@ -85,6 +86,7 @@ class RunListItem(BaseModel):
     broken: int
     skipped: int
     duration_ms: int | None
+    environment: list | None = None
     created_at: datetime
     completed_at: datetime | None
 

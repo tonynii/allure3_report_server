@@ -71,6 +71,14 @@ const tableColumns = [
       <n-tag :bordered="false" v-if="store.current.commit_hash">commit: {{ store.current.commit_hash }}</n-tag>
     </n-space>
 
+    <n-descriptions v-if="store.current.environment?.length"
+      label-placement="left" :columns="3" size="small" style="margin-bottom: 16px"
+      title="环境信息" bordered>
+      <n-descriptions-item v-for="e in store.current.environment" :key="e.key" :label="e.key">
+        {{ e.value }}
+      </n-descriptions-item>
+    </n-descriptions>
+
     <StatsCards v-bind="store.current" style="margin-bottom: 16px" />
 
     <n-space justify="space-between" align="center" style="margin-bottom: 12px">

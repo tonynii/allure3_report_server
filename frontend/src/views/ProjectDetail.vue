@@ -21,6 +21,29 @@ const dialog = useDialog()
 const uploading = ref(false)
 const showSettings = ref(false)
 const editForm = ref({ name: '', description: '', max_runs: 20 })
+const hoverRow = ref<any>(null)
+const hoverTimer = ref<number | null>(null)
+const hoverPos = ref({ x: 0, y: 0 })
+
+function onRowEnter(e: MouseEvent, row: any) {
+  hoverPos.value = { x: e.clientX + 16, y: e.clientY - 120 }
+  if (hoverTimer.value) clearTimeout(hoverTimer.value)
+  hoverTimer.value = window.setTimeout(() => { hoverRow.value = row }, 350)
+}
+
+function onRowLeave() {
+  if (hoverTimer.value) clearTimeout(hoverTimer.value)
+  hoverTimer.value = window.setTimeout(() => { hoverRow.value = null }, 150)
+}
+
+function onCardEnter() {
+  if (hoverTimer.value) clearTimeout(hoverTimer.value)
+}
+
+function onCardLeave() {
+  if (hoverTimer.value) clearTimeout(hoverTimer.value)
+  hoverRow.value = null
+}
 
 const key = computed(() => route.params.key as string)
 
@@ -109,9 +132,23 @@ const columns = [
   { title: '时间', key: 'created_at', render: (row: any) => formatTime(row.created_at) },
   { title: '状态', key: 'status', render: (row: any) => h(StatusTag, { status: row.status }) },
   { title: 'Branch', key: 'branch', render: (row: any) => row.branch || '-' },
-  { title: 'Total', key: 'total' },
-  { title: 'Passed', key: 'passed', render: (row: any) => h('span', { style: { color: '#18a058' } }, row.passed) },
-  { title: 'Failed', key: 'failed', render: (row: any) => h('span', { style: { color: '#d03050' } }, row.failed) },
+  { title: '结果', key: 'stats', render: (row: any) =>
+    h('span', {}, [
+      h('span', {}, `${row.total} `),
+      h('span', { style: { color: '#18a058' } }, `✅${row.passed} `),
+      h('span', { style: { color: '#d03050' } }, `❌${row.failed} `),
+      h('span', { style: { color: '#f0a020' } }, `💥${row.broken}`),
+    ])
+  },
+  { title: '通过率', key: 'pass_rate', width: 80,
+    render: (row: any) => {
+      const d = row.passed + row.failed + row.broken
+      if (d === 0) return h('span', { style: { color: '#999' } }, '-')
+      const rate = Math.round((row.passed / d) * 100)
+      const color = rate >= 90 ? '#18a058' : rate >= 70 ? '#f0a020' : '#d03050'
+      return h('span', { style: { color, fontWeight: 'bold' } }, `${rate}%`)
+    },
+  },
   { title: 'Duration', key: 'duration_ms', render: (row: any) => formatDuration(row.duration_ms) },
   {
     title: '操作',
@@ -164,10 +201,32 @@ const columns = [
 
     <n-card title="Run 历史" size="small">
       <n-data-table :columns="columns" :data="runStore.runs" :bordered="false"
-        :row-props="(row: any) => ({ style: 'cursor: pointer', onClick: () => goToRun(row.id) })"
+        :row-props="(row: any) => ({
+          style: 'cursor: pointer',
+          onMouseenter: (e: MouseEvent) => onRowEnter(e, row),
+          onMouseleave: onRowLeave,
+        })"
         :row-class-name="(_: any, i: number) => i % 2 ? 'row-alt' : ''"
         :pagination="{ pageSize: 10 }" />
     </n-card>
+
+    <div v-if="hoverRow" :style="{
+      position: 'fixed', top: hoverPos.y + 'px', left: hoverPos.x + 'px',
+      zIndex: 9999, minWidth: '260px', maxWidth: '480px', maxHeight: '60vh', overflowY: 'auto',
+    }" @mouseenter="onCardEnter" @mouseleave="onCardLeave">
+      <n-card size="small" :bordered="true">
+        <template #header>
+          <n-text strong style="font-size: 13px">{{ hoverRow.branch || 'Run' }} {{ hoverRow.id?.slice(0, 8) }}...</n-text>
+        </template>
+        <n-descriptions v-if="hoverRow.environment?.length" :columns="1" size="small" label-placement="left">
+          <n-descriptions-item v-for="e in hoverRow.environment" :key="e.key" :label="e.key">
+            {{ e.value }}
+          </n-descriptions-item>
+        </n-descriptions>
+        <n-text v-else depth="3" style="font-size: 12px">无环境信息</n-text>
+      </n-card>
+    </div>
+
     <n-modal v-model:show="showSettings" title="⚙️ 项目设置">
       <n-card style="width: 500px" role="dialog" :bordered="false">
         <n-form label-placement="left" label-width="100">

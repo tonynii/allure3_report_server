@@ -86,6 +86,9 @@ async def parse_results(run: Run, db: AsyncSession) -> None:
         await _parse_steps(tr, data.get("steps", []), db)
         await _parse_attachments(tr, data.get("attachments", []), results_dir, db)
 
+    # Parse environment files
+    await _parse_environment(run, results_dir)
+
     run.total = sum(stats.values())
     run.passed = stats["passed"]
     run.failed = stats["failed"]
@@ -163,3 +166,39 @@ async def _parse_attachments(
             size=size,
         )
         db.add(att)
+
+
+async def _parse_environment(run: Run, results_dir: Path) -> None:
+    """Parse environment.xml or environment.properties into run.environment."""
+    xml_file = results_dir / "environment.xml"
+    props_file = results_dir / "environment.properties"
+
+    if xml_file.exists():
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            items = []
+            for p in root.findall("parameter"):
+                k = p.findtext("key", "")
+                v = p.findtext("value", "")
+                if k:
+                    items.append({"key": k, "value": v})
+            run.environment = items
+            return
+        except Exception as e:
+            logger.warning("Failed to parse environment.xml: %s", e)
+
+    if props_file.exists():
+        try:
+            items = []
+            for line in props_file.read_text(errors="ignore").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    items.append({"key": k.strip(), "value": v.strip()})
+            run.environment = items
+        except Exception as e:
+            logger.warning("Failed to parse environment.properties: %s", e)

@@ -42,6 +42,7 @@ class Run(Base):
     unknown: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    environment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

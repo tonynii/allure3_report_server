@@ -14,6 +14,7 @@ export interface Run {
   unknown: number
   duration_ms: number | null
   error_message: string | null
+  environment: { key: string; value: string }[] | null
   created_at: string
   completed_at: string | null
 }
