@@ -62,7 +62,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
 
         if latest:
             total_passed += latest.passed or 0
-            total_tests += latest.total or 0
+            total_tests += (latest.passed or 0) + (latest.failed or 0) + (latest.broken or 0)
 
     # Overall pass rate
     overall_pass_rate = round(total_passed / total_tests, 4) if total_tests > 0 else 0

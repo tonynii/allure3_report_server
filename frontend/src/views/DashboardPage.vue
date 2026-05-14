@@ -19,9 +19,23 @@ const recentColumns = [
   { title: 'Run', key: 'id', width: 100, render: (row: any) => row.id.slice(0, 6) + '...' },
   { title: '项目', key: 'project_name', width: 120 },
   { title: '状态', key: 'status', width: 90, render: (row: any) => h(StatusTag, { status: row.status }) },
-  { title: '通过', key: 'passed', width: 70, render: (row: any) => h('span', { style: { color: '#18a058' } }, row.passed) },
-  { title: '失败', key: 'failed', width: 70, render: (row: any) => h('span', { style: { color: row.failed > 0 ? '#d03050' : '#999' } }, row.failed) },
-  { title: 'Total', key: 'total', width: 60 },
+  { title: '结果', key: 'stats', render: (row: any) =>
+    h('span', {}, [
+      h('span', {}, `${row.total} `),
+      h('span', { style: { color: '#18a058' } }, `✅${row.passed} `),
+      h('span', { style: { color: '#d03050' } }, `❌${row.failed} `),
+      h('span', { style: { color: '#f0a020' } }, `💥${row.broken}`),
+    ])
+  },
+  { title: '通过率', key: 'pass_rate', width: 70,
+    render: (row: any) => {
+      const d = row.passed + row.failed + row.broken
+      if (d === 0) return h('span', { style: { color: '#999' } }, '-')
+      const rate = Math.round((row.passed / d) * 100)
+      const color = rate >= 90 ? '#18a058' : rate >= 70 ? '#f0a020' : '#d03050'
+      return h('span', { style: { color, fontWeight: 'bold' } }, `${rate}%`)
+    },
+  },
   { title: '时间', key: 'created_at', render: (row: any) => formatTime(row.created_at) },
 ]
 </script>
@@ -62,15 +76,15 @@ const recentColumns = [
             <n-space vertical size="small" align="end">
               <StatusTag :status="p.latest_run?.status || 'unknown'" size="small" />
               <n-text v-if="p.latest_run" depth="3" style="font-size: 12px">
-                {{ p.latest_run.passed }}/{{ p.latest_run.total }} 通过
+                {{ p.latest_run.passed || 0 }}/{{ (p.latest_run.passed || 0) + (p.latest_run.failed || 0) + (p.latest_run.broken || 0) }} 通过
               </n-text>
             </n-space>
           </n-space>
           <n-progress
-            v-if="p.latest_run?.total"
+            v-if="(p.latest_run?.passed || 0) + (p.latest_run?.failed || 0) + (p.latest_run?.broken || 0)"
             type="line"
-            :percentage="Math.round((p.latest_run.passed / p.latest_run.total) * 100)"
-            :color="(p.latest_run.passed / p.latest_run.total) >= 0.9 ? '#18a058' : (p.latest_run.passed / p.latest_run.total) >= 0.7 ? '#f0a020' : '#d03050'"
+            :percentage="p.latest_run ? Math.round(((p.latest_run.passed || 0) / ((p.latest_run.passed || 0) + (p.latest_run.failed || 0) + (p.latest_run.broken || 0))) * 100) : 0"
+            :color="p.latest_run ? ((p.latest_run.passed / (p.latest_run.passed + p.latest_run.failed + p.latest_run.broken)) >= 0.9 ? '#18a058' : (p.latest_run.passed / (p.latest_run.passed + p.latest_run.failed + p.latest_run.broken)) >= 0.7 ? '#f0a020' : '#d03050') : '#999'"
             :height="4"
             :border-radius="2"
             style="margin-top: 8px"

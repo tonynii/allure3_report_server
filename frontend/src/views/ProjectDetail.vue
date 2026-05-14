@@ -128,9 +128,9 @@ async function handleSave() {
 }
 
 const columns = [
-  { title: 'Run ID', key: 'id', render: (row: any) => row.id.slice(0, 8) + '...' },
-  { title: '时间', key: 'created_at', render: (row: any) => formatTime(row.created_at) },
-  { title: '状态', key: 'status', render: (row: any) => h(StatusTag, { status: row.status }) },
+  { title: 'Run ID', key: 'id', render: (row: any) => h('span', { onMouseenter: (e: MouseEvent) => onRowEnter(e, row), onMouseleave: onRowLeave, style: 'cursor: pointer' }, row.id.slice(0, 8) + '...') },
+  { title: '时间', key: 'created_at', render: (row: any) => h('span', { onMouseenter: (e: MouseEvent) => onRowEnter(e, row), onMouseleave: onRowLeave, style: 'cursor: pointer' }, formatTime(row.created_at)) },
+  { title: '状态', key: 'status', render: (row: any) => h('span', { onMouseenter: (e: MouseEvent) => onRowEnter(e, row), onMouseleave: onRowLeave, style: 'cursor: pointer' }, h(StatusTag, { status: row.status })) },
   { title: 'Branch', key: 'branch', render: (row: any) => row.branch || '-' },
   { title: '结果', key: 'stats', render: (row: any) =>
     h('span', {}, [
@@ -201,11 +201,7 @@ const columns = [
 
     <n-card title="Run 历史" size="small">
       <n-data-table :columns="columns" :data="runStore.runs" :bordered="false"
-        :row-props="(row: any) => ({
-          style: 'cursor: pointer',
-          onMouseenter: (e: MouseEvent) => onRowEnter(e, row),
-          onMouseleave: onRowLeave,
-        })"
+        :row-props="() => ({ style: 'cursor: pointer' })"
         :row-class-name="(_: any, i: number) => i % 2 ? 'row-alt' : ''"
         :pagination="{ pageSize: 10 }" />
     </n-card>
