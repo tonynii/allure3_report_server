@@ -25,7 +25,12 @@ async function handleCreate() {
     newProject.value = { key: '', name: '', max_runs: 20 }
     message.success('项目创建成功')
   } catch (e: any) {
-    message.error(e.response?.data?.detail || '创建失败')
+    const detail = e.response?.data?.detail
+    if (Array.isArray(detail)) {
+      message.error(detail[0]?.msg || '参数校验失败')
+    } else {
+      message.error(detail || '创建失败')
+    }
   }
 }
 
