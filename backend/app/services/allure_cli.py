@@ -127,7 +127,7 @@ async def fix_history_urls(project_key: str, run_id: str) -> None:
     for entry in entries:
         entry_uuid = entry.get("uuid", "")
         if entry_uuid in url_map and not entry.get("url"):
-            entry["url"] = f"/api/projects/{project_key}/reports/{url_map[entry_uuid]}/"
+            entry["url"] = f"/reports/{project_key}/{url_map[entry_uuid]}/"
             changed = True
 
     if changed:

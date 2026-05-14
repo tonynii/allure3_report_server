@@ -98,8 +98,11 @@ function handleDeleteRun(runId: string) {
 }
 
 function viewReport(runId?: string) {
-  const id = runId || 'latest'
-  window.open(`/api/projects/${key.value}/reports/${id}/`, '_blank')
+  if (runId) {
+    window.open(`/reports/${key.value}/${runId}/`, '_blank')
+  } else if (latest.value) {
+    window.open(`/reports/${key.value}/${latest.value.id}/`, '_blank')
+  }
 }
 
 function openSettings() {

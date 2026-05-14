@@ -26,6 +26,8 @@ services:
     build: ./frontend
     ports:
       - "80:80"
+    volumes:
+      - allure_data:/data/allure:ro
     depends_on:
       - backend
 
