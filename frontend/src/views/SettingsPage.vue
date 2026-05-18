@@ -2,14 +2,15 @@
 import { h, ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { getSettings, type SettingsData, type SettingsProject } from '../api/dashboard'
-import { updateProject, deleteProject } from '../api/projects'
+import { updateProject, deleteProject, getProject } from '../api/projects'
+import AllureConfigEditor from '../components/AllureConfigEditor.vue'
 
 const message = useMessage()
 const dialog = useDialog()
 const data = ref<SettingsData | null>(null)
 const loading = ref(true)
 const editProject = ref<SettingsProject | null>(null)
-const editForm = ref({ name: '', description: '', max_runs: 20 })
+const editForm = ref({ name: '', description: '', max_runs: 20, allure_config: null as string | null })
 const showEdit = computed({
   get: () => !!editProject.value,
   set: (v) => { if (!v) editProject.value = null },
@@ -24,9 +25,13 @@ onMounted(async () => {
   }
 })
 
-function openEdit(p: SettingsProject) {
+async function openEdit(p: SettingsProject) {
   editProject.value = p
-  editForm.value = { name: p.name, description: p.description || '', max_runs: p.max_runs }
+  editForm.value = { name: p.name, description: p.description || '', max_runs: p.max_runs, allure_config: null }
+  try {
+    const { data } = await getProject(p.key)
+    editForm.value.allure_config = data.allure_config ?? null
+  } catch {}
 }
 
 async function handleSave() {
@@ -44,6 +49,15 @@ async function handleSave() {
   } catch (err: any) {
     message.error(err.response?.data?.detail || '保存失败')
   }
+}
+
+async function handleConfigSaved(c: string) {
+  editForm.value.allure_config = c as string | null
+  if (editProject.value) {
+    editProject.value = { ...editProject.value }
+  }
+  const { data: d } = await getSettings()
+  data.value = d
 }
 
 function handleDelete(p: SettingsProject) {
@@ -109,26 +123,37 @@ const columns = [
         :row-class-name="(_: any, i: number) => i % 2 ? 'row-alt' : ''" />
     </n-spin>
 
-    <n-modal v-model:show="showEdit" title="编辑项目">
-      <n-card v-if="editProject" style="width: 500px" role="dialog" :bordered="false">
-        <n-form label-placement="left" label-width="100">
-          <n-form-item label="Key">
-            <n-text>{{ editProject.key }}</n-text>
-          </n-form-item>
-          <n-form-item label="名称" required>
-            <n-input v-model:value="editForm.name" placeholder="项目名称" />
-          </n-form-item>
-          <n-form-item label="描述">
-            <n-input v-model:value="editForm.description" type="textarea" placeholder="项目描述" />
-          </n-form-item>
-          <n-form-item label="保留 Runs">
-            <n-input-number v-model:value="editForm.max_runs" :min="1" :max="200" />
-          </n-form-item>
-        </n-form>
-        <n-space justify="end">
-          <n-button @click="editProject = null">取消</n-button>
-          <n-button type="primary" @click="handleSave">保存</n-button>
-        </n-space>
+    <n-modal v-model:show="showEdit" title="编辑项目" style="width: 700px">
+      <n-card v-if="editProject" role="dialog" :bordered="false">
+        <n-tabs type="line" default-value="basic">
+          <n-tab-pane name="basic" tab="基本信息">
+            <n-form label-placement="left" label-width="100">
+              <n-form-item label="Key">
+                <n-text>{{ editProject.key }}</n-text>
+              </n-form-item>
+              <n-form-item label="名称" required>
+                <n-input v-model:value="editForm.name" placeholder="项目名称" />
+              </n-form-item>
+              <n-form-item label="描述">
+                <n-input v-model:value="editForm.description" type="textarea" placeholder="项目描述" />
+              </n-form-item>
+              <n-form-item label="保留 Runs">
+                <n-input-number v-model:value="editForm.max_runs" :min="1" :max="200" />
+              </n-form-item>
+            </n-form>
+            <n-space justify="end">
+              <n-button @click="editProject = null">取消</n-button>
+              <n-button type="primary" @click="handleSave">保存</n-button>
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane name="config" tab="Allure 配置">
+            <AllureConfigEditor
+              :project-key="editProject.key"
+              :config="editForm.allure_config"
+              @saved="handleConfigSaved"
+            />
+          </n-tab-pane>
+        </n-tabs>
       </n-card>
     </n-modal>
   </div>

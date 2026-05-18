@@ -4,12 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog } from 'naive-ui'
 import { useProjectStore } from '../stores/project'
 import { useRunStore } from '../stores/run'
-import { uploadResults, deleteRun } from '../api/reports'
+import { uploadResults, deleteRun, regenerateReport } from '../api/reports'
 import { updateProject } from '../api/projects'
 import StatsCards from '../components/StatsCards.vue'
 import PieChart from '../components/PieChart.vue'
 import TrendChart from '../components/TrendChart.vue'
 import StatusTag from '../components/StatusTag.vue'
+import AllureConfigEditor from '../components/AllureConfigEditor.vue'
 import { formatDuration, formatTime } from '../utils/format'
 
 const route = useRoute()
@@ -20,7 +21,7 @@ const message = useMessage()
 const dialog = useDialog()
 const uploading = ref(false)
 const showSettings = ref(false)
-const editForm = ref({ name: '', description: '', max_runs: 20 })
+const editForm = ref({ name: '', description: '', max_runs: 20, allure_config: null as string | null })
 const hoverRow = ref<any>(null)
 const hoverTimer = ref<number | null>(null)
 const hoverPos = ref({ x: 0, y: 0 })
@@ -105,12 +106,43 @@ function viewReport(runId?: string) {
   }
 }
 
+const regeneratingRunId = ref<string | null>(null)
+
+async function handleRegenerateRun(runId: string) {
+  regeneratingRunId.value = runId
+  try {
+    await regenerateReport(key.value, runId)
+    message.success('正在重新生成...')
+    let attempts = 0
+    while (attempts < 60) {
+      await new Promise(r => setTimeout(r, 2000))
+      await runStore.fetchRuns(key.value)
+      const run = runStore.runs.find(r => r.id === runId)
+      if (run && run.status !== 'processing') {
+        if (run.status === 'completed') {
+          message.success('报告重新生成完成')
+          await projectStore.fetch(key.value)
+        } else {
+          message.error(`重新生成失败: ${(run as any).error_message || '未知错误'}`)
+        }
+        break
+      }
+      attempts++
+    }
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || '重新生成失败')
+  } finally {
+    regeneratingRunId.value = null
+  }
+}
+
 function openSettings() {
   if (!projectStore.current) return
   editForm.value = {
     name: projectStore.current.name,
     description: projectStore.current.description || '',
     max_runs: projectStore.current.max_runs,
+    allure_config: projectStore.current.allure_config,
   }
   showSettings.value = true
 }
@@ -128,6 +160,11 @@ async function handleSave() {
   } catch (err: any) {
     message.error(err.response?.data?.detail || '保存失败')
   }
+}
+
+async function handleConfigSaved(c: string) {
+  editForm.value.allure_config = c as string | null
+  await projectStore.fetch(key.value)
 }
 
 const columns = [
@@ -156,7 +193,7 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
-    width: 200,
+    width: 280,
     render: (row: any) =>
       h('n-space', { size: 'small' }, [
         h('n-button', {
@@ -168,6 +205,13 @@ const columns = [
               size: 'small', ghost: true, type: 'success',
               onClick: (e: Event) => { e.stopPropagation(); viewReport(row.id) },
             }, { default: () => '📄 报告' })
+          : h('span', {}, '-'),
+        row.status === 'completed' || row.status === 'failed'
+          ? h('n-button', {
+              size: 'small', ghost: true, type: 'warning',
+              loading: regeneratingRunId.value === row.id,
+              onClick: (e: Event) => { e.stopPropagation(); handleRegenerateRun(row.id) },
+            }, { default: () => '🔄 重生成' })
           : h('span', {}, '-'),
         h('n-button', {
           size: 'small', ghost: true, type: 'error',
@@ -226,23 +270,34 @@ const columns = [
       </n-card>
     </div>
 
-    <n-modal v-model:show="showSettings" title="⚙️ 项目设置">
-      <n-card style="width: 500px" role="dialog" :bordered="false">
-        <n-form label-placement="left" label-width="100">
-          <n-form-item label="名称" required>
-            <n-input v-model:value="editForm.name" placeholder="项目名称" />
-          </n-form-item>
-          <n-form-item label="描述">
-            <n-input v-model:value="editForm.description" type="textarea" placeholder="项目描述" />
-          </n-form-item>
-          <n-form-item label="保留 Runs">
-            <n-input-number v-model:value="editForm.max_runs" :min="1" :max="200" />
-          </n-form-item>
-        </n-form>
-        <n-space justify="end">
-          <n-button @click="showSettings = false">取消</n-button>
-          <n-button type="primary" @click="handleSave">保存</n-button>
-        </n-space>
+    <n-modal v-model:show="showSettings" title="⚙️ 项目设置" style="width: 700px">
+      <n-card role="dialog" :bordered="false">
+        <n-tabs type="line" default-value="basic">
+          <n-tab-pane name="basic" tab="基本信息">
+            <n-form label-placement="left" label-width="100">
+              <n-form-item label="名称" required>
+                <n-input v-model:value="editForm.name" placeholder="项目名称" />
+              </n-form-item>
+              <n-form-item label="描述">
+                <n-input v-model:value="editForm.description" type="textarea" placeholder="项目描述" />
+              </n-form-item>
+              <n-form-item label="保留 Runs">
+                <n-input-number v-model:value="editForm.max_runs" :min="1" :max="200" />
+              </n-form-item>
+            </n-form>
+            <n-space justify="end">
+              <n-button @click="showSettings = false">取消</n-button>
+              <n-button type="primary" @click="handleSave">保存</n-button>
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane name="config" tab="Allure 配置">
+            <AllureConfigEditor
+              :project-key="key"
+              :config="editForm.allure_config ?? null"
+              @saved="handleConfigSaved"
+            />
+          </n-tab-pane>
+        </n-tabs>
       </n-card>
     </n-modal>
   </div>

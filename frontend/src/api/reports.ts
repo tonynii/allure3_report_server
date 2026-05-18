@@ -79,3 +79,6 @@ export const getTestResult = (key: string, runId: string, testId: string) =>
 
 export const deleteRun = (key: string, id: string) =>
   client.delete(`/api/projects/${key}/runs/${id}`)
+
+export const regenerateReport = (key: string, id: string) =>
+  client.post<Run>(`/api/projects/${key}/runs/${id}/regenerate`)

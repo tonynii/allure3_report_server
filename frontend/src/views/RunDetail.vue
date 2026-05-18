@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { h, computed, onMounted } from 'vue'
+import { h, computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useRunStore } from '../stores/run'
-import { deleteRun } from '../api/reports'
+import { deleteRun, regenerateReport } from '../api/reports'
 import StatusTag from '../components/StatusTag.vue'
 import StatsCards from '../components/StatsCards.vue'
 import { formatDuration } from '../utils/format'
@@ -14,6 +14,7 @@ const message = useMessage()
 const store = useRunStore()
 const key = computed(() => route.params.key as string)
 const runId = computed(() => route.params.id as string)
+const regenerating = ref(false)
 
 onMounted(() => store.fetch(key.value, runId.value))
 
@@ -28,6 +29,32 @@ async function handleDelete() {
     router.push(`/projects/${key.value}`)
   } catch (err: any) {
     message.error(err.response?.data?.detail || '删除失败')
+  }
+}
+
+async function handleRegenerate() {
+  regenerating.value = true
+  try {
+    await regenerateReport(key.value, runId.value)
+    message.success('正在重新生成...')
+    let attempts = 0
+    while (attempts < 60) {
+      await new Promise(r => setTimeout(r, 2000))
+      await store.fetch(key.value, runId.value)
+      if (store.current && store.current.status !== 'processing') {
+        if (store.current.status === 'completed') {
+          message.success('报告重新生成完成')
+        } else {
+          message.error(`重新生成失败: ${store.current.error_message || '未知错误'}`)
+        }
+        break
+      }
+      attempts++
+    }
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || '重新生成失败')
+  } finally {
+    regenerating.value = false
   }
 }
 
@@ -54,16 +81,29 @@ const tableColumns = [
         <n-h2 style="margin: 0">Run {{ runId.slice(0, 8) }}...</n-h2>
         <StatusTag :status="store.current.status" />
       </n-space>
-      <n-popconfirm
-        negative-text="取消"
-        positive-text="确认删除"
-        @positive-click="handleDelete"
-      >
-        <template #trigger>
-          <n-button type="error" ghost size="small">🗑 删除</n-button>
-        </template>
-        确定删除此运行及其所有数据？此操作不可撤销
-      </n-popconfirm>
+      <n-space align="center" style="margin-left: auto">
+        <n-popconfirm
+          v-if="store.current.status === 'completed' || store.current.status === 'failed'"
+          negative-text="取消"
+          positive-text="确认重新生成"
+          @positive-click="handleRegenerate"
+        >
+          <template #trigger>
+            <n-button :loading="regenerating" ghost size="small">🔄 重新生成</n-button>
+          </template>
+          确定要重新生成报告吗？将使用当前 Allure 配置重新生成 HTML。
+        </n-popconfirm>
+        <n-popconfirm
+          negative-text="取消"
+          positive-text="确认删除"
+          @positive-click="handleDelete"
+        >
+          <template #trigger>
+            <n-button type="error" ghost size="small">🗑 删除</n-button>
+          </template>
+          确定删除此运行及其所有数据？此操作不可撤销
+        </n-popconfirm>
+      </n-space>
     </n-space>
 
     <n-space style="margin-bottom: 8px">

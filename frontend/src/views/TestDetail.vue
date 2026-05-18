@@ -24,8 +24,8 @@ onMounted(async () => {
   }
 })
 
-function downloadAttachment(attId: string) {
-  window.open(`/api/projects/${key.value}/attachments/${attId}`, '_blank')
+function canPreview(a: { size: number; source: string }) {
+  return a.size > 0 && !!a.source
 }
 </script>
 
@@ -95,7 +95,11 @@ function downloadAttachment(attId: string) {
                 <n-text>📎 {{ a.name || a.source }}</n-text>
                 <n-text depth="3">({{ a.type }}, {{ formatSize(a.size) }})</n-text>
               </n-space>
-              <n-button size="tiny" ghost @click="downloadAttachment(a.id)">下载</n-button>
+              <n-button v-if="canPreview(a)" size="tiny" ghost>
+                <a :href="`/api/projects/${key}/attachments/${a.id}`" target="_blank"
+                  style="text-decoration: none; color: inherit;">下载</a>
+              </n-button>
+              <n-text v-else depth="3">无文件</n-text>
             </n-space>
           </n-list-item>
         </n-list>

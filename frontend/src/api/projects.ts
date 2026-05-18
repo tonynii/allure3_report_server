@@ -5,6 +5,7 @@ export interface Project {
   name: string
   description: string | null
   max_runs: number
+  allure_config: string | null
   runs_count: number
   latest_run_status: string | null
   created_at: string
@@ -21,6 +22,9 @@ export interface ProjectCreate {
 export const listProjects = () => client.get<Project[]>('/api/projects')
 export const getProject = (key: string) => client.get<Project>(`/api/projects/${key}`)
 export const createProject = (data: ProjectCreate) => client.post<Project>('/api/projects', data)
-export const updateProject = (key: string, data: Partial<ProjectCreate>) =>
+export const updateProject = (key: string, data: Partial<ProjectCreate> & { allure_config?: string }) =>
   client.put<Project>(`/api/projects/${key}`, data)
 export const deleteProject = (key: string) => client.delete(`/api/projects/${key}`)
+
+export const getDefaultAllureConfig = (key: string) =>
+  client.get<{ config: string }>(`/api/projects/${key}/allure-config-default`)

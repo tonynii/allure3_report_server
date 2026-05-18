@@ -1,5 +1,6 @@
 import io
 import logging
+import mimetypes
 import shutil
 import zipfile
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from app.schemas import (
     TestResultSummary,
     TestResultDetail,
 )
-from app.services.allure_cli import generate_report
+from app.services.allure_cli import generate_report, cleanup_history_for_runs
 from app.services.result_parser import parse_results
 from app.services.cleanup import cleanup_old_runs
 
@@ -94,6 +95,7 @@ async def upload_results(
         str(run.id),
         project_key,
         project.name,
+        project.allure_config,
     )
 
     return _to_run_response(run)
@@ -279,11 +281,25 @@ async def download_attachment(
     if not file.exists():
         raise HTTPException(status_code=404, detail="Attachment file not found on disk")
 
-    return FileResponse(
-        file,
-        filename=att.name or att.source,
-        media_type=att.type or "application/octet-stream",
+    effective_type = att.type or ""
+    if not effective_type:
+        guessed, _ = mimetypes.guess_type(att.name or att.source)
+        effective_type = guessed or "application/octet-stream"
+
+    is_previewable = (
+        effective_type.startswith("image/")
+        or effective_type.startswith("text/")
+        or effective_type in ("application/json", "application/pdf")
     )
+
+    if is_previewable:
+        return FileResponse(file, media_type=effective_type)
+    else:
+        return FileResponse(
+            file,
+            filename=att.name or att.source,
+            media_type=effective_type,
+        )
 
 
 @router.delete("/{project_key}/runs/{run_id}", status_code=204)
@@ -292,19 +308,46 @@ async def delete_run(project_key: str, run_id: str, db: AsyncSession = Depends(g
     await db.delete(run)
     await db.commit()
 
-    import json as _json
     run_dir = settings.run_dir(project_key, run_id)
     if run_dir.exists():
         shutil.rmtree(run_dir)
 
-    url_map_path = settings.project_dir(project_key) / "url_map.json"
-    if url_map_path.exists():
-        mapping = _json.loads(url_map_path.read_text())
-        to_remove = [k for k, v in mapping.items() if v == run_id]
-        if to_remove:
-            for k in to_remove:
-                del mapping[k]
-            url_map_path.write_text(_json.dumps(mapping, indent=2))
+    cleanup_history_for_runs(project_key, [run_id])
+
+
+@router.post("/{project_key}/runs/{run_id}/regenerate", response_model=RunResponse)
+async def regenerate_report(
+    project_key: str,
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await db.get(Project, project_key)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    run = await _get_run_or_404(project_key, run_id, db)
+    if run.status not in ("completed", "failed"):
+        raise HTTPException(status_code=400, detail="Can only regenerate completed or failed runs")
+
+    report_dir = settings.report_dir(project_key, str(run.id))
+    if report_dir.exists():
+        shutil.rmtree(report_dir)
+
+    run.status = "processing"
+    run.error_message = None
+    await db.commit()
+    await db.refresh(run)
+
+    background_tasks.add_task(
+        _regenerate_run,
+        str(run.id),
+        project_key,
+        project.name,
+        project.allure_config,
+    )
+
+    return _to_run_response(run)
 
 
 @router.get("/{project_key}/reports/latest/{path:path}")
@@ -346,7 +389,7 @@ async def _serve_report_file(project_key: str, run_id: str, path: str):
     return FileResponse(target)
 
 
-async def _process_run(run_id: str, project_key: str, project_name: str) -> None:
+async def _process_run(run_id: str, project_key: str, project_name: str, allure_config: str | None = None) -> None:
     from app.database import async_session
 
     async with async_session() as db:
@@ -357,7 +400,7 @@ async def _process_run(run_id: str, project_key: str, project_name: str) -> None
         try:
             await parse_results(run, db)
             await db.commit()
-            await generate_report(project_key, run_id, project_name)
+            await generate_report(project_key, run_id, project_name, allure_config)
 
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)
@@ -379,3 +422,25 @@ async def _cleanup_if_needed(project_key: str):
         project = await cleanup_db.get(Project, project_key)
         if project:
             await cleanup_old_runs(project, cleanup_db)
+
+
+async def _regenerate_run(run_id: str, project_key: str, project_name: str, allure_config: str | None = None) -> None:
+    from app.database import async_session
+
+    async with async_session() as db:
+        run = await db.get(Run, run_id)
+        if not run:
+            return
+
+        try:
+            await generate_report(project_key, run_id, project_name, allure_config)
+
+            run.status = "completed"
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+        except Exception as e:
+            logger.exception("Failed to regenerate report for run %s: %s", run_id, e)
+            run.status = "failed"
+            run.error_message = str(e)[:1000]
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
