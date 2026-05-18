@@ -1,308 +1,307 @@
 # Allure3 Report Service
 
-基于 FastAPI 的全托管 Allure 3 测试报告平台。用户通过 API 上传 pytest `allure-results`，平台自动生成 Allure 3 静态 HTML 报告，支持按项目划分、历史追踪、结构化数据存入 PostgreSQL 供 LLM 分析。
+基于 FastAPI 的全托管 Allure 3 测试报告平台。用户通过 API 或 Web 界面上传 pytest `allure-results`，平台自动生成 Allure 3 静态 HTML 报告，支持按项目划分、历史追踪、附件下载、多 Run 横向对比。测试结果结构化存入 PostgreSQL 供 LLM 分析。
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.12+
-- PostgreSQL 16
-- Node.js 22 (Allure 3 CLI)
-- Docker & Docker Compose (可选部署方式)
+- Node.js 22+ (Allure 3 CLI)
+- Docker & Docker Compose (推荐)
+- PostgreSQL 16 (Docker Compose 已包含)
+
+### Docker Compose 一键部署
+
+```bash
+git clone https://github.com/tonynii/allure3_report_server.git
+cd allure3_report_server
+docker compose up -d
+```
+
+Docker 使用 `backend/.env.docker` 配置环境变量（数据库 host 为 `db`），可直接修改后重建生效。
 
 ### 本地开发
 
 ```bash
-# 1. 安装 uv 包管理器
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# ── 后端 ──
+cd backend
+cp .env.example .env                         # 首次初始化（localhost 连接）
+uv sync                                    # 安装依赖
+uv run alembic upgrade head                # 数据库迁移
+uv run uvicorn app.main:app --reload       # 启动 API (localhost:8000)
 
-# 2. 克隆项目
-git clone <repo-url> allure3-s
-cd allure3-s/backend
+# 本地需要 PostgreSQL 运行在 localhost:5432
+# 或通过 Docker Compose 单独启动: docker compose up -d db
 
-# 3. 配置环境变量 (可选，.env 已有默认值)
-cp .env.example .env
-# 编辑 .env: 修改数据库连接等
-
-# 4. 安装依赖
-uv sync
-
-# 5. 数据库迁移
-uv run alembic upgrade head
-
-# 6. 启动服务
-uv run uvicorn app.main:app --reload
-
-# 服务运行在 http://localhost:8000
-# API 文档: http://localhost:8000/docs
+# ── 前端 ──
+cd frontend
+npm install                                # 安装依赖
+npm run dev                                # 启动前端 (localhost:5173)
 ```
-
-### Docker Compose 部署
-
-```bash
-# 一键启动 (PostgreSQL + Backend)
-docker compose up -d
-
-# 查看日志
-docker compose logs -f backend
-
-# 停止
-docker compose down
-
-# 停止并清理数据卷
-docker compose down -v
-```
-
-服务启动后：
-- API: `http://localhost:8000/api/health`
-- Swagger 文档: `http://localhost:8000/docs`
 
 ## 使用流程
 
-### 使用上传脚本 (推荐)
+### Web 界面
+
+1. 打开 `http://localhost`，看板主页展示项目概况
+2. 通过「📁 项目」创建/管理项目，或「🔧 工具」上传报告
+3. 项目详情：Stats 卡片 + 饼图/趋势图 + Run 历史表格
+4. Run 详情：结构化测试列表（筛选/搜索）→ 点击测试查看步骤/错误/附件
+5. 「📊 横向对比」支持多项目/多 Run 同时对比，发现回归和共同失败
+
+### CLI 上传脚本
 
 ```bash
-# 从 backend 目录运行
 cd backend
 uv run ../scripts/upload.py --project my-app ./allure-results/
-
-# 带更多选项
-uv run ../scripts/upload.py \
-  --server http://localhost:8000 \
-  --project my-app \
-  --branch main \
-  --commit abc1234 \
-  ./allure-results/
-
-# 查看帮助
-uv run ../scripts/upload.py --help
+uv run ../scripts/upload.py -s https://reports.example.com -p my-app -b main ./allure-results/
 ```
 
-脚本自动完成: 打包 → 上传 → 轮询 → 输出报告 URL 和统计
-
-### 手动 API 调用
-
-### 1. 创建项目
+### curl 手动调用
 
 ```bash
 curl -X POST http://localhost:8000/api/projects \
   -H "Content-Type: application/json" \
-  -d '{
-    "key": "my-app",
-    "name": "My Application",
-    "description": "后端回归测试",
-    "max_runs": 20
-  }'
-```
+  -d '{"key":"my-app","name":"My Application","max_runs":20}'
 
-### 2. 上传测试结果
-
-```bash
-# 上传 allure-results.zip
 curl -X POST http://localhost:8000/api/projects/my-app/runs \
-  -F "file=@allure-results.zip" \
-  -F "branch=main" \
-  -F "commit_hash=abc1234"
-# 返回 202 + {"id": "...", "status": "processing", ...}
+  -F "file=@allure-results.zip" -F "branch=main"
 ```
 
-### 3. 查询状态
+## 前端页面
 
-```bash
-curl http://localhost:8000/api/projects/my-app/runs/{run_id}
-# status: "processing" → "completed" / "failed"
+### 侧边栏菜单
+
+| 菜单 | 路由 | 说明 |
+|------|------|------|
+| 📊 看板 | `/` | Dashboard 主页：项目数/Runs/通过率 + 项目概况卡片 + 最近运行 |
+| 📁 项目 | `/projects` | 项目卡片网格 + 创建/删除 |
+| 🔧 工具 | `/tools` | 上传 allure-results.zip + 📊 横向对比入口 |
+| ⚙️ 配置 | `/settings` | Allure 版本、数据目录、项目概况表（✏️编辑 🗑删除） |
+
+### 全部页面
+
+| 路径 | 页面 | 说明 |
+|------|------|------|
+| `/` | DashboardPage | 看板主页：统计卡片 + 项目概况 + 最近运行列表 |
+| `/projects` | ProjectsPage | 项目卡片网格 + 创建/删除 |
+| `/projects/:key` | ProjectDetail | Stats卡片 + 饼图/趋势图 + Run表格（📊📄🗑） |
+| `/projects/:key/runs/:id` | RunDetail | 测试列表 + 状态筛选 + 搜索 + 🗑删除 |
+| `/projects/:key/runs/:id/tests/:tid` | TestDetail | 步骤树 + 错误堆栈 + 附件下载 |
+| `/projects/:key/reports/latest` | ReportViewer | iframe 嵌入最新 Allure HTML |
+| `/projects/:key/reports/:id` | ReportViewer | iframe 嵌入历史 Allure HTML |
+| `/tools` | ToolsPage | 选择项目上传 allure-results.zip |
+| `/tools/compare` | ComparePage | 多 Run 横向对比矩阵 |
+| `/settings` | SettingsPage | Allure 版本 + 数据目录 + 项目概况编辑 |
+
+### 双入口设计
+
+| 按钮 | 数据来源 | 行为 |
+|------|----------|------|
+| 📊 详情 | PostgreSQL 结构化数据 | `router.push` → RunDetail / TestDetail |
+| 📄 报告 | Allure 静态 HTML | `window.open` 新标签 / iframe |
+
+### 删除功能
+
+| 位置 | 确认方式 |
+|------|----------|
+| 项目卡片 | `n-popconfirm` |
+| Run 表格 | `dialog.warning()` 模态框 |
+| RunDetail 头部 | `n-popconfirm` |
+| 配置页项目表 | `dialog.warning()` 模态框 |
+
+### 横向对比
+
+多 Run 横向对比，入口：`🔧 工具` → `📊 横向对比`
+
+- 支持同项目不同分支/历史 Run、跨项目对比
+- 按 `historyId` 匹配同一测试在不同 Run 中的结果
+- 分类：全部通过 / 全部失败 / 有差异 / 不稳定
+- 支持关键词搜索 + "仅显示有变化" 过滤
+- 点击行弹窗展示详情（错误信息、Labels）
+
+### 奇偶行交替
+
+所有数据表格均支持奇偶行交替灰白背景。
+
+## API 端点
+
+### 项目管理
+
+| Method | Path | 说明 |
+|--------|------|------|
+| `POST` | `/api/projects` | 创建项目 |
+| `GET` | `/api/projects` | 项目列表 |
+| `GET` | `/api/projects/{key}` | 项目详情 |
+| `PUT` | `/api/projects/{key}` | 更新项目 |
+| `DELETE` | `/api/projects/{key}` | 删除项目及所有数据 |
+
+### 报告管理
+
+| Method | Path | 说明 |
+|--------|------|------|
+| `POST` | `/api/projects/{key}/runs` | 上传 allure-results.zip → 202 |
+| `GET` | `/api/projects/{key}/runs` | 所有 runs 列表 |
+| `GET` | `/api/projects/{key}/runs/{id}` | run 详情 + 测试统计 |
+| `DELETE` | `/api/projects/{key}/runs/{id}` | 删除单个 run |
+| `GET` | `/api/projects/{key}/runs/{id}/tests/{tid}` | 单个测试详情 (步骤、错误、附件) |
+| `GET` | `/api/projects/{key}/reports/latest/{path}` | 最新报告静态文件 |
+| `GET` | `/api/projects/{key}/reports/{id}/{path}` | 历史报告静态文件 |
+| `GET` | `/api/projects/{key}/attachments/{aid}` | 下载附件文件 |
+
+### 看板 & 对比
+
+| Method | Path | 说明 |
+|--------|------|------|
+| `GET` | `/api/dashboard` | 看板聚合数据 |
+| `GET` | `/api/settings` | 全局配置 + 项目概况 (含 Allure 版本) |
+| `POST` | `/api/compare` | 多 Run 横向对比 |
+
+### 其他
+
+| Method | Path | 说明 |
+|--------|------|------|
+| `GET` | `/api/health` | 健康检查 |
+
+## 上传处理流程
+
+1. `POST /api/projects/{key}/runs` 上传 allure-results.zip → 返回 `202` + `run_id`
+2. 后台任务:
+   - 解压 zip → `runs/{run_id}/allure-results/`
+   - `result_parser.py`: 解析 `*-result.json` → 写入 PostgreSQL
+   - `allure_cli.py`: 调用 `npx allure awesome` 生成静态 HTML
+   - `allure_cli.py`: `fix_history_urls()` 补全 history 链接
+   - `cleanup.py`: 超出 `max_runs` 的旧 run 自动删除
+3. 客户端轮询 `GET .../runs/{run_id}` 查状态
+4. 报告通过 `GET .../reports/{run_id}/` 访问
+
+## History 机制
+
+Allure 3 通过 `history.jsonl` 原生管理历史数据。每次生成报告时 `appendHistory: true` 自动追加一行，驱动趋势图、flaky 检测、历史对比。
+
+### History URL 修复
+
+Allure 3 默认不填 history entry 的 `url` 字段，导致 History 标签链接不可点击。
+
+`fix_history_urls()` 维护 `url_map.json` 映射文件 (allure_uuid → run_id)，处理逻辑：
+
+1. 记录新报告 Allure UUID → run_id 映射
+2. 遍历 `history.jsonl`，为已知映射的 entry 补全 `url` 字段
+
+## 数据布局
+
+```
+/data/allure/projects/
+  {project_key}/
+    ├── allurerc.mjs              # Allure 配置
+    ├── history.jsonl             # 历史记录
+    ├── url_map.json              # allure_uuid → run_id 映射
+    ├── attachments/              # 附件文件
+    └── runs/
+        └── {run_id}/
+            ├── allure-results/   # 上传的原始结果
+            └── allure-report/    # 生成的静态 HTML
 ```
 
-### 4. 查看报告
+## 数据库表
 
-- 最新报告: `http://localhost:8000/api/projects/my-app/reports/latest/`
-- 历史报告: `http://localhost:8000/api/projects/my-app/reports/{run_id}/`
-- API 查看 run 列表: `GET /api/projects/my-app/runs`
+| 表 | 说明 |
+|----|------|
+| `projects` | 项目 (key, name, description, max_runs, created_at, updated_at) |
+| `runs` | 运行记录 (id, project_key, status, branch, commit_hash, 统计, duration, error) |
+| `test_results` | 测试结果 (uuid, history_id, name, status, labels/links/parameters JSONB) |
+| `test_steps` | 测试步骤 (parent_step_id 自引用嵌套) |
+| `test_attachments` | 附件元信息 (name, source, type, file_path, size) |
 
-## 报告 History 机制
-
-Allure 3 通过 `history.jsonl` (JSON Lines 格式) 原生管理历史数据，无需数据库介入。
-
-### 工作原理
-
-```
-每项目一个 history.jsonl 文件
-    ↓
-每次生成报告时 Allure CLI 自动追加一行记录
-    ↓
-报告中自动展现趋势图、flaky 检测、历史对比
-```
-
-### 文件结构
-
-`/data/allure/projects/{key}/history.jsonl` — 每行一个 JSON 对象，代表一次完整 run：
-
-```jsonl
-{"uuid":"abc-123","name":"My App","timestamp":1715436800000,"knownTestCaseIds":["tc1","tc2"],"testResults":{...},"metrics":{}}
-{"uuid":"def-456","name":"My App","timestamp":1715523200000,"knownTestCaseIds":["tc1","tc2","tc3"],"testResults":{...},"metrics":{}}
-```
-
-### 历史数据提供的能力
-
-| 功能 | 数据源 |
-|------|--------|
-| **Trend 图表** (通过/失败趋势) | history.jsonl |
-| **Duration 趋势** | history.jsonl |
-| **Flaky 测试检测** | 多条历史记录对比 |
-| **Test History Tab** (测试详情页) | 按 historyId 检索 |
-| **Categories 趋势** | history.jsonl |
-
-### History 生命周期
-
-- 每次 `allure awesome` 生成报告时，`appendHistory: true` 确保自动追加
-- History 数据**无限增长**，不受 `max_runs` 清理策略影响
-- 删除项目时随 `rm -rf /data/allure/projects/{key}/` 一并清理
-- 可通过修改 `allurerc.mjs` 中的 `appendHistory` 来控制行为
-
-## 配置参考
+## 配置
 
 ### 环境变量
 
-所有环境变量前缀 `ALLURE_`，在 `backend/.env` 或 Docker Compose 中设置：
+所有环境变量通过 `backend/.env` 文件设置，前缀 `ALLURE_`。
+
+| 文件 | 用途 | 提交 |
+|------|------|------|
+| `backend/.env.example` | 配置模板 | ✅ 提交 |
+| `backend/.env` | 本地开发 (复制自 `.env.example`) | ❌ 不提交 |
+| `backend/.env.docker` | Docker Compose 部署 | ✅ 提交 |
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ALLURE_DATABASE_URL` | `postgresql+asyncpg://allure:allure@localhost:5432/allure3` | 异步连接 (FastAPI) |
+| `ALLURE_DATABASE_URL` | `postgresql+asyncpg://allure:allure@localhost:5432/allure3` | 异步连接 |
 | `ALLURE_DATABASE_URL_SYNC` | `postgresql://allure:allure@localhost:5432/allure3` | 同步连接 (Alembic) |
-| `ALLURE_DATA_DIR` | `/data/allure` | 报告和数据存储根目录 |
+| `ALLURE_DATA_DIR` | `/data/allure` | 数据存储根目录 |
+| `ALLURE_MAX_RUNS_DEFAULT` | `20` | 新建项目默认保留 run 数 |
+| `ALLURE_REPORT_LANGUAGE` | `zh` | Allure 报告默认语言 |
 
-### 项目配置
-
-每个项目创建时可设置：
+### 项目参数
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
 | `key` | 必填 | 唯一标识，`^[a-zA-Z0-9_-]+$` |
 | `name` | 必填 | 显示名称 |
 | `description` | — | 项目描述 |
-| `max_runs` | 20 | 保留的最大历史报告数 |
+| `max_runs` | 20 | 保留的最大 run 数 |
 
-## 数据布局
+## 部署架构
 
 ```
-/data/allure/projects/
-  my-app/
-    ├── allurerc.mjs              # Allure 配置 (historyPath)
-    ├── history.jsonl             # 历史数据 (无限增长)
-    ├── attachments/              # 附件文件
-    └── runs/
-        ├── 550e8400-e29b-.../    # run_id (UUID)
-        │   ├── allure-results/   # 上传的原始结果
-        │   └── allure-report/    # 生成的静态 HTML
-        └── 6ba7b810-9dad-.../
+Browser :80
+    │
+    ▼
+┌─ frontend (nginx) ────────────┐
+│  /              → dist/       │  Vue SPA
+│  /api/*         → backend     │  API proxy
+│  /docs          → backend     │  Swagger
+└───────────┬───────────────────┘
+            │
+            ▼
+┌─ backend :8000 (internal) ────┐
+│  FastAPI + async SQLAlchemy   │
+│  + Node.js (allure CLI)       │
+└───────────┬───────────────────┘
+            │
+            ▼
+┌─ db :5432 (internal) ─────────┐
+│  PostgreSQL 16                │
+└───────────────────────────────┘
 ```
 
-## 数据库表
+## 技术栈
 
-### projects — 项目管理
-```
-key (PK) | name | description | max_runs | created_at | updated_at
-```
+| 层 | 技术 |
+|---|------|
+| Web 框架 | FastAPI (async) |
+| Python 环境 | uv |
+| ORM | SQLAlchemy 2.0 (async) |
+| 数据库 | PostgreSQL 16 |
+| 迁移 | Alembic |
+| 报告生成 | Allure 3 CLI (`npx allure awesome`) |
+| 前端 | Vue 3 (TypeScript) |
+| UI 组件 | Naive UI |
+| 图表 | ECharts |
+| 状态管理 | Pinia |
+| 部署 | Docker Compose (Nginx + FastAPI + PostgreSQL) |
 
-### runs — 运行记录
-```
-id (PK) | project_key (FK) | status | branch | commit_hash |
-total/passed/failed/broken/skipped/unknown | duration_ms |
-error_message | created_at | completed_at
-```
-
-### test_results — 测试用例结果 (供 LLM 分析)
-```
-id (PK) | run_id (FK) | uuid | history_id | name | full_name |
-description | status | stage | start_time | stop_time | duration_ms |
-labels (JSONB) | links (JSONB) | parameters (JSONB) | status_details (JSONB)
-```
-
-### test_steps — 测试步骤
-```
-id (PK) | test_result_id (FK) | parent_step_id (self-FK) |
-name | status | stage | start_time | stop_time | duration_ms | status_details (JSONB)
-```
-
-### test_attachments — 附件元信息
-```
-id (PK) | test_result_id (FK) | step_id (FK) |
-name | source | type | file_path | size
-```
-
-## API 参考
-
-### 项目管理
-
-| Method | Path | 说明 | Body/Query |
-|--------|------|------|-----------|
-| `POST` | `/api/projects` | 创建 | `{key, name, description?, max_runs?}` |
-| `GET` | `/api/projects` | 列表 | — |
-| `GET` | `/api/projects/{key}` | 详情 | — |
-| `PUT` | `/api/projects/{key}` | 更新 | `{name?, description?, max_runs?}` |
-| `DELETE` | `/api/projects/{key}` | 删除项目、数据、报告 | — |
-
-### 报告管理
-
-| Method | Path | 说明 | Body/Query |
-|--------|------|------|-----------|
-| `POST` | `/api/projects/{key}/runs` | 上传 zip → 202 | `file`, `branch?`, `commit_hash?` (multipart) |
-| `GET` | `/api/projects/{key}/runs` | 列表 | — |
-| `GET` | `/api/projects/{key}/runs/{id}` | 详情+统计 | — |
-| `GET` | `/api/projects/{key}/runs/{id}/tests/{tid}` | 测试详情 | — |
-| `GET` | `/api/projects/{key}/reports/latest/{path}` | 最新报告 | `path=""` → index.html |
-| `GET` | `/api/projects/{key}/reports/{id}/{path}` | 历史报告 | `path=""` → index.html |
-
-### 健康检查
-
-| Method | Path | 说明 |
-|--------|------|------|
-| `GET` | `/api/health` | `{"status": "ok"}` |
-
-## 开发指南
-
-### uv 命令速查
+## 开发命令
 
 ```bash
-uv sync          # 安装/同步依赖
-uv run <cmd>     # 在 venv 中运行命令
-uv add <pkg>     # 添加依赖
-uv remove <pkg>  # 移除依赖
-uv lock          # 更新 lock 文件
+# ── 后端 ──
+cd backend
+uv sync                                    # 安装依赖
+uv run uvicorn app.main:app --reload       # 启动
+uv run alembic upgrade head                # 迁移
+uv add <pkg>                               # 加依赖
+
+# ── 前端 ──
+cd frontend
+npm install                                # 安装依赖
+npm run dev                                # 启动
+npm run build                              # 构建
+
+# ── Docker ──
+docker compose up -d                       # 启动所有服务
+docker compose build backend               # 重建后端
+docker compose build frontend              # 重建前端
+docker compose logs -f                     # 查看日志
 ```
-
-### 数据库迁移
-
-```bash
-# 生成迁移 (需 PostgreSQL 运行)
-uv run alembic revision --autogenerate -m "描述"
-
-# 执行迁移
-uv run alembic upgrade head
-
-# 回滚
-uv run alembic downgrade -1
-```
-
-### 目录创建
-
-服务首次运行时自动创建 `/data/allure/projects/` 目录结构。
-
-### 安装 Allure CLI
-
-Allure 3 CLI 需要 Node.js，在 Docker 镜像中已预装。本地开发时手动安装：
-
-```bash
-npm install -g allure
-allure --version  # >= 3.0.0
-```
-
-## 架构要点
-
-1. **Allure 调用**: Python 通过 `subprocess` 执行 `npx allure awesome`，以 project 目录为 cwd
-2. **History**: 使用 Allure 原生 `history.jsonl` 机制，不存数据库
-3. **报告服务**: 自定义 FastAPI 路由 + `FileResponse` 映射文件系统路径
-4. **数据双存**: 原始文件存文件系统，结构化数据存 PostgreSQL (LLM 分析用)
-5. **清理**: 每项目保留最近 `max_runs` 个 run，超出自动删除（文件+DB）
-6. **前端分离**: 预留 Vue 3 独立前端，CORS 已开启

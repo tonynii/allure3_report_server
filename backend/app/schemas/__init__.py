@@ -17,6 +17,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     max_runs: int | None = Field(None, ge=1, le=200)
+    allure_config: str | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -24,6 +25,7 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     max_runs: int
+    allure_config: str | None = None
     runs_count: int = 0
     latest_run_status: str | None = None
     created_at: datetime
@@ -64,6 +66,7 @@ class RunResponse(BaseModel):
     unknown: int
     duration_ms: int | None
     error_message: str | None
+    environment: list | None = None
     created_at: datetime
     completed_at: datetime | None
 
@@ -85,6 +88,7 @@ class RunListItem(BaseModel):
     broken: int
     skipped: int
     duration_ms: int | None
+    environment: list | None = None
     created_at: datetime
     completed_at: datetime | None
 
@@ -115,7 +119,7 @@ class TestResultDetail(TestResultSummary):
     links: list | None
     parameters: list | None
     status_details: dict | None
-    steps: list["TestStepSummary"] = []
+    steps: list["TestStepDetail"] = []
     attachments: list["TestAttachmentSummary"] = []
 
     model_config = {"from_attributes": True}
@@ -153,3 +157,9 @@ class TestAttachmentSummary(BaseModel):
     size: int
 
     model_config = {"from_attributes": True}
+
+
+# ── Allure Config ──────────────────────────────────────────────────────
+
+class AllureConfigDefault(BaseModel):
+    config: str

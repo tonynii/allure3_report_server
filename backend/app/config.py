@@ -7,12 +7,25 @@ class Settings(BaseSettings):
     database_url_sync: str = "postgresql://allure:allure@localhost:5432/allure3"
     data_dir: str = "/data/allure"
     max_runs_default: int = 20
+    report_language: str = "zh"
     host: str = "0.0.0.0"
     port: int = 8000
+    base_url: str = ""
+
+    def build_url(self, path: str) -> str:
+        """Return a full URL if base_url is set, otherwise return the relative path."""
+        if not self.base_url:
+            return path
+        base = self.base_url.rstrip("/")
+        return f"{base}{path}"
 
     @property
     def projects_dir(self) -> Path:
         return Path(self.data_dir) / "projects"
+    
+    @property
+    def history_file(self) -> Path:
+        return Path("history.jsonl")
 
     def project_dir(self, project_key: str) -> Path:
         return self.projects_dir / project_key
@@ -33,7 +46,7 @@ class Settings(BaseSettings):
         return self.project_dir(project_key) / "allurerc.mjs"
 
     def history_path(self, project_key: str) -> Path:
-        return self.project_dir(project_key) / "history.jsonl"
+        return self.project_dir(project_key) / self.history_file
 
     model_config = {"env_prefix": "ALLURE_"}
 

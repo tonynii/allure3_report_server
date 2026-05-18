@@ -5,6 +5,7 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import Project, Run
+from app.services.allure_cli import cleanup_history_for_runs
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ async def cleanup_old_runs(project: Project, db: AsyncSession) -> int:
         if run_dir.exists():
             shutil.rmtree(run_dir)
             logger.info("Deleted run directory: %s", run_dir)
+
+    cleanup_history_for_runs(project.key, [str(rid) for rid in old_ids])
 
     stmt = delete(Run).where(Run.id.in_(old_ids))
     await db.execute(stmt)

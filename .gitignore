@@ -1,3 +1,9 @@
+# Frontend
+frontend/dist/
+frontend/node_modules/
+frontend/src/auto-imports.d.ts
+frontend/src/components.d.ts
+
 # Python
 __pycache__/
 *.pyc
@@ -9,6 +15,7 @@ build/
 
 # Environment
 .env
+.env.local
 
 # IDE
 .vscode/

@@ -3,7 +3,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Project, Run
-from app.schemas import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
+from app.schemas import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse, AllureConfigDefault
+from app.services.allure_cli import _default_allure_config_mjs
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -19,6 +20,7 @@ async def create_project(body: ProjectCreate, db: AsyncSession = Depends(get_db)
         name=body.name,
         description=body.description,
         max_runs=body.max_runs,
+        allure_config=_default_allure_config_mjs(body.name),
     )
     db.add(project)
     await db.commit()
@@ -58,6 +60,7 @@ async def get_project(project_key: str, db: AsyncSession = Depends(get_db)):
         name=project.name,
         description=project.description,
         max_runs=project.max_runs,
+        allure_config=project.allure_config,
         runs_count=runs_count,
         latest_run_status=latest_status,
         created_at=project.created_at,
@@ -76,9 +79,19 @@ async def update_project(project_key: str, body: ProjectUpdate, db: AsyncSession
         project.description = body.description
     if body.max_runs is not None:
         project.max_runs = body.max_runs
+    if body.allure_config is not None:
+        project.allure_config = body.allure_config
     await db.commit()
     await db.refresh(project)
     return _to_project_response(project)
+
+
+@router.get("/{project_key}/allure-config-default", response_model=AllureConfigDefault)
+async def get_default_allure_config_endpoint(project_key: str, db: AsyncSession = Depends(get_db)):
+    project = await db.get(Project, project_key)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return AllureConfigDefault(config=_default_allure_config_mjs(project.name))
 
 
 @router.delete("/{project_key}", status_code=204)
@@ -119,6 +132,7 @@ def _to_project_response(p: Project) -> ProjectResponse:
         name=p.name,
         description=p.description,
         max_runs=p.max_runs,
+        allure_config=p.allure_config,
         created_at=p.created_at,
         updated_at=p.updated_at,
     )
