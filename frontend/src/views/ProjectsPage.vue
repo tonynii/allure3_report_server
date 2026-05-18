@@ -45,7 +45,10 @@ function handleDelete(key: string, e: Event) {
   <div>
     <n-space justify="space-between" align="center" style="margin-bottom: 24px">
       <n-h2 style="margin: 0">项目列表</n-h2>
-      <n-button type="primary" @click="showCreate = true">+ 创建项目</n-button>
+      <n-space>
+        <n-button :loading="store.loading" @click="store.fetchAll()">🔄 刷新</n-button>
+        <n-button type="primary" @click="showCreate = true">+ 创建项目</n-button>
+      </n-space>
     </n-space>
 
     <n-spin :show="store.loading">

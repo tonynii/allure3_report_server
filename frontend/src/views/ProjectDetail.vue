@@ -20,6 +20,7 @@ const runStore = useRunStore()
 const message = useMessage()
 const dialog = useDialog()
 const uploading = ref(false)
+const refreshing = ref(false)
 const showSettings = ref(false)
 const editForm = ref({ name: '', description: '', max_runs: 20, allure_config: null as string | null })
 const hoverRow = ref<any>(null)
@@ -136,6 +137,15 @@ async function handleRegenerateRun(runId: string) {
   }
 }
 
+async function handleRefresh() {
+  refreshing.value = true
+  try {
+    await Promise.all([projectStore.fetch(key.value), runStore.fetchRuns(key.value)])
+  } finally {
+    refreshing.value = false
+  }
+}
+
 function openSettings() {
   if (!projectStore.current) return
   editForm.value = {
@@ -230,6 +240,7 @@ const columns = [
       <n-text depth="3">({{ projectStore.current.key }})</n-text>
 
       <n-space style="margin-left: auto">
+        <n-button :loading="refreshing" @click="handleRefresh">🔄 刷新</n-button>
         <n-upload :show-file-list="false" accept=".zip" @change="handleUpload" :disabled="uploading">
           <n-button :loading="uploading" type="primary">{{ uploading ? '上传中...' : '📤 上传报告' }}</n-button>
         </n-upload>
