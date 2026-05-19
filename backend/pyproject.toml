@@ -13,7 +13,11 @@ dependencies = [
     "aiofiles>=24.0.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
+    "mcp[cli]>=1.9.0",
 ]
+
+[project.scripts]
+allure3-mcp = "app.mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]

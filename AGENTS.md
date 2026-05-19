@@ -17,7 +17,8 @@
 | 前端 | Vue 3 (TypeScript, 独立项目，前后端分离) |
 | 前端 UI | Naive UI + ECharts |
 | 状态管理 | Pinia |
-| 部署 | Docker Compose (Nginx + FastAPI + PostgreSQL) |
+| MCP Server | FastMCP (streamable-http) |
+| 部署 | Docker Compose (Nginx + FastAPI + MCP + PostgreSQL) |
 
 ## Directory Structure
 
@@ -84,6 +85,12 @@ allure3-s/
 │           ├── allure_cli.py       # 调用 allure awesome CLI + fix_history_urls
 │           ├── result_parser.py    # 解析 allure-results JSON → 写 DB
 │           └── cleanup.py          # 按 max_runs 清理旧 runs
+│       └── mcp/                    # MCP Server 模块
+│           ├── __init__.py
+│           ├── server.py           # FastMCP 实例 + lifespan + 启动入口
+│           ├── tools.py            # 11 个 MCP Tool + Pydantic 输出模型
+│           ├── resources.py        # 3 个 MCP Resource
+│           └── prompts.py          # 2 个 MCP Prompt
 └── scripts/
     └── upload.py                   # CLI 上传工具
 ```
@@ -99,6 +106,11 @@ uv run alembic upgrade head      # 数据库迁移
 uv run alembic revision --autogenerate -m "description"
 uv add <package>                 # 添加依赖
 uv remove <package>
+
+# ── MCP Server ──
+cd backend
+uv run python -m app.mcp.server    # 启动 MCP Server (localhost:8001)
+uv run mcp dev app/mcp/server.py   # MCP Inspector 调试
 
 # ── Frontend ──
 cd frontend
@@ -121,6 +133,8 @@ docker compose build frontend    # 重建前端
 | `ALLURE_DATABASE_URL` | `postgresql+asyncpg://allure:allure@localhost:5432/allure3` | 异步数据库连接 |
 | `ALLURE_DATABASE_URL_SYNC` | `postgresql://allure:allure@localhost:5432/allure3` | 同步连接（Alembic） |
 | `ALLURE_DATA_DIR` | `/data/allure` | 数据存储根目录 |
+| `ALLURE_MCP_HOST` | `0.0.0.0` | MCP Server 监听地址 |
+| `ALLURE_MCP_PORT` | `8001` | MCP Server 监听端口 |
 
 ## Data Storage Layout
 
@@ -294,26 +308,29 @@ After:  {"uuid":"abc","url":"/api/projects/my-app/reports/our-run-id/",...}
 ## Deployment Architecture
 
 ```
-Browser :80
+Browser :8088
     │
     ▼
-┌─ frontend (nginx) ────────────┐
-│  /              → dist/       │  Vue SPA (static HTML)
-│  /api/*         → backend     │  API proxy
-│  /docs          → backend     │  Swagger proxy
-│  /openapi.json  → backend     │
+┌─ frontend (nginx) ───────────────────────────┐
+│  /              → dist/       │  Vue SPA     │
+│  /api/*         → backend     │  API proxy   │
+│  /mcp           → backend     │  MCP proxy   │
+│  /docs          → backend     │  Swagger     │
+│  /openapi.json  → backend     │              │
+│  /reports/*     → static      │  Allure HTML │
 └───────────┬───────────────────┘
             │
             ▼
-┌─ backend :8000 (internal) ────┐
-│  FastAPI + async SQLAlchemy   │
-│  + Node.js (allure CLI)       │
-└───────────┬───────────────────┘
-            │
-            ▼
-┌─ db :5432 (internal) ─────────┐
-│  PostgreSQL 16                │
-└───────────────────────────────┘
+┌─ backend :8000 ──────────────────────────────┐
+│  FastAPI + ORM + Node.js                     │
+│  └─ /mcp: FastMCP Server (ASGI Mount)        │
+│     共享 app.models/config/db                │
+└──────────┬───────────────┘
+           │
+           ▼
+┌─ db :5432 ───────────┐
+│  PostgreSQL 16        │
+└───────────────────────┘
 ```
 
 ## Key Architectural Decisions
@@ -326,12 +343,71 @@ Browser :80
 6. **前端分离**: Vue3 前端作为独立项目，通过 CORS 调用 REST API
 7. **Nginx 反向代理**: 统一入口 `:80`，前端 SPA + /api/* 代理到 FastAPI，解决跨域和部署复杂度
 8. **横向对比**: 通过 historyId 跨 Run/跨项目匹配同一测试，支持多维度对比分析
+9. **MCP Server**: 独立进程运行 FastMCP，共享后端数据层，通过 nginx 统一端口对外呈现。Tools 直接查询 PostgreSQL，返回结构化 Pydantic 模型供 LLM 消费
 
 ## Project Key Convention
 
 - `project_key`: 用户指定的唯一标识符，必须匹配 `^[a-zA-Z0-9_-]+$`，如 "my-app-backend"
 - `run_id`: UUID，自动生成
 - 上传文件: `.zip` 格式，包含 `allure-results/` 目录或直接包含 `*-result.json` 文件
+
+## MCP Server
+
+基于 FastMCP 的 MCP Server，使用 streamable-http 传输协议，独立运行在 `:8001` 端口，与前端的 nginx 反向代理统一对外呈现。
+
+共享 `app.models`、`app.config`、`app.database`，无需重复维护数据模型。
+
+### MCP Tools (11 个)
+
+| Tool | 参数 | 说明 |
+|------|------|------|
+| `list_projects` | 无 | 列出所有项目 + 最新运行状态和通过率 |
+| `get_project` | `project_key` | 项目详情 + 最近 10 次运行列表 |
+| `list_runs` | `project_key`, `limit`, `status` | 列出行历史，可按状态筛选 |
+| `get_run` | `project_key`, `run_id` | Run 详情 + 所有测试结果摘要 |
+| `list_failed_tests` | `project_key`, `run_id` | 失败/异常测试列表，含错误信息和堆栈 |
+| `get_test_detail` | `project_key`, `run_id`, `test_id` | 完整测试详情（步骤树 + 堆栈 + 附件） |
+| `analyze_failures` | `project_key`, `run_id` | 智能失败分析：错误分类、Flaky/已知问题、慢测试 |
+| `compare_runs` | `run_ids: [{project, run}]` | 多 Run 横向对比，按 historyId 匹配 |
+| `search_tests` | `project_key`, `keyword`, `status`, `run_id` | 跨运行搜索测试用例 |
+| `get_run_trend` | `project_key`, `limit` | 最近 N 次运行的通过率趋势 |
+| `get_environment` | `project_key`, `run_id` | 运行环境信息 |
+
+### MCP Resources (3 个)
+
+| URI | 说明 |
+|-----|------|
+| `allure://projects` | 项目列表 |
+| `allure://{project_key}/overview` | 项目概览 + 最近 run 统计 |
+| `allure://{project_key}/runs/{run_id}/summary` | Run 统计摘要 |
+
+### MCP Prompts (2 个)
+
+| 名称 | 说明 |
+|------|------|
+| Failure Root Cause Analysis | 引导 LLM 分析失败根因并给出修复建议 |
+| Project Health Check | 引导 LLM 进行项目健康度检查和趋势分析 |
+
+### Clients 接入方式
+
+**Cursor / VS Code**：在 MCP 配置中添加 streamable-http endpoint：
+
+```json
+{
+  "mcpServers": {
+    "allure3": {
+      "url": "http://localhost:8088/mcp"
+    }
+  }
+}
+```
+
+**Claude Desktop**：使用 stdio transport：
+
+```bash
+cd backend
+uv run mcp install app/mcp/server.py --name "Allure3 Report Server"
+```
 
 ## Upload Script
 

@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     base_url: str = ""
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8001
 
     def build_url(self, path: str) -> str:
         """Return a full URL if base_url is set, otherwise return the relative path."""
