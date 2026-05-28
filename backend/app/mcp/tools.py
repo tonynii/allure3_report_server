@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.mcp.server import mcp
 from app.database import async_session
-from app.models import Project, Run, TestResult, TestStep, TestAttachment
+from app.models import Project, Run, TestResult, TestStep, TestAttachment, FailurePattern
 from app.config import settings
 
 
@@ -279,6 +279,65 @@ class ComparisonResult(BaseModel):
     columns: list[dict]
     summary: dict
     tests: list[dict]
+
+
+class FailureFingerprint(BaseModel):
+    error_type: str = Field(description="错误类型：AssertionError/TimeoutError/...")
+    error_location: dict | None = Field(description="错误位置 {file, line, function}")
+    signature_hash: str = Field(description="归一化消息的 MD5 签名")
+    test_labels: dict | None = Field(description="测试标签 {feature, epic, layer, ...}")
+    failure_modality: str = Field(description="失败模态: assertion_failure/infrastructure_failure/data_issue/unknown")
+    environment_snapshot: dict | None = Field(description="运行环境快照")
+    raw_message: str | None = Field(description="原始错误消息")
+    raw_trace: str | None = Field(description="原始堆栈")
+
+
+class PatternDetail(BaseModel):
+    id: str
+    signature_hash: str
+    error_type: str
+    error_location: dict | None
+    error_exemplar: str | None
+    failure_modality: str | None
+    occurrence_count: int
+    last_status: str
+    confidence: float
+    first_seen: str | None = None
+    last_seen: str | None = None
+    resolved_at: str | None = None
+
+
+class KBOverview(BaseModel):
+    total: int
+    active: int
+    resolved: int
+    reappeared: int
+    top_patterns: list[PatternDetail]
+
+
+class HealthIndicator(BaseModel):
+    name: str
+    raw_value: float
+    score: float
+    weight: float
+    threshold: float
+    status: str
+
+
+class DegradationAlert(BaseModel):
+    indicator: str
+    severity: str
+    consecutive_drops: int
+    total_drop: float
+
+
+class HealthReport(BaseModel):
+    project_key: str
+    grade: str
+    total_score: float
+    indicators: list[HealthIndicator]
+    alerts: list[DegradationAlert]
+    trend: str
 
 
 # ── Tools ───────────────────────────────────────────────────────
@@ -554,6 +613,8 @@ async def analyze_failures(project_key: str, run_id: str) -> FailureAnalysis:
     这是失败分析的推荐入口，之后可用 get_test_detail 查看具体详情。"""
 
     async with async_session() as db:
+        from app.services.failure_fingerprint import classify_error
+
         run = await db.get(Run, run_id)
         if not run or run.project_key != project_key:
             raise ValueError(f"运行 '{run_id}' 在项目 '{project_key}' 中不存在")
@@ -570,7 +631,7 @@ async def analyze_failures(project_key: str, run_id: str) -> FailureAnalysis:
 
         for t in failed_tests:
             msg = _err_msg(t.status_details)
-            pattern = _classify_error(msg)
+            pattern = classify_error(msg)
             error_categories[pattern].append(t.name or "")
             if _is_flaky_sd(t.status_details):
                 flaky_tests.append(t.name or "")
@@ -893,4 +954,133 @@ async def get_attachment_content(
             text_content=text,
             content_truncated=content_truncated,
             truncated_at=MAX_TEXT_SIZE if content_truncated else None,
+        )
+
+
+# ── P0+P1 Tools ─────────────────────────────────────────────────
+
+@mcp.tool()
+async def fingerprint_failure(project_key: str, run_id: str, test_id: str) -> FailureFingerprint:
+    """生成单个失败测试的六维指纹向量。
+    包含错误类型、错误位置、签名哈希、测试标签、失败模态等信息，
+    是知识库匹配和根因分析的基础特征。"""
+
+    from app.services.failure_fingerprint import build_fingerprint
+
+    async with async_session() as db:
+        run = await db.get(Run, run_id)
+        if not run or run.project_key != project_key:
+            raise ValueError(f"运行 '{run_id}' 在项目 '{project_key}' 中不存在")
+        tr = await db.get(TestResult, test_id)
+        if not tr or tr.run_id != run.id:
+            raise ValueError(f"测试 '{test_id}' 不存在")
+        fp = build_fingerprint(tr)
+        return FailureFingerprint(
+            error_type=fp["error_type"],
+            error_location=fp["error_location"],
+            signature_hash=fp["signature_hash"],
+            test_labels=fp["test_labels"],
+            failure_modality=fp["failure_modality"],
+            environment_snapshot=fp["environment_snapshot"],
+            raw_message=fp["raw_message"],
+            raw_trace=fp["raw_trace"],
+        )
+
+
+@mcp.tool()
+async def query_failure_kb(project_key: str, test_id: str) -> list[PatternDetail]:
+    """查询某个失败测试在知识库中的历史模式匹配结果。
+    返回匹配的 failure_patterns 列表，可用于识别已知问题和回归。"""
+
+    from app.services.failure_fingerprint import build_fingerprint
+    from app.services.failure_kb import query_failure_kb as _query_kb
+
+    async with async_session() as db:
+        tr = await db.get(TestResult, test_id)
+        if not tr:
+            raise ValueError(f"测试 '{test_id}' 不存在")
+        fp = build_fingerprint(tr)
+        patterns = await _query_kb(project_key, fp["signature_hash"], db)
+        return [
+            PatternDetail(
+                id=p["id"],
+                signature_hash=p["signature_hash"],
+                error_type=p["error_type"],
+                error_location=p.get("error_location"),
+                error_exemplar=p.get("error_exemplar"),
+                failure_modality=p.get("failure_modality"),
+                occurrence_count=p["occurrence_count"],
+                last_status=p["last_status"],
+                confidence=p["confidence"],
+            )
+            for p in patterns
+        ]
+
+
+@mcp.tool()
+async def get_kb_overview(project_key: str) -> KBOverview:
+    """获取项目失败知识库概览。
+    包含总模式数、active/resolved/reappeared 分布、Top 高频失败模式。"""
+
+    from app.services.failure_kb import get_kb_overview as _get_overview
+
+    async with async_session() as db:
+        data = await _get_overview(project_key, db)
+        return KBOverview(
+            total=data["total"],
+            active=data["active"],
+            resolved=data["resolved"],
+            reappeared=data["reappeared"],
+            top_patterns=[
+                PatternDetail(
+                    id=p["id"],
+                    signature_hash=p["signature_hash"],
+                    error_type=p["error_type"],
+                    error_location=p.get("error_location"),
+                    error_exemplar=p.get("error_exemplar"),
+                    failure_modality=p.get("failure_modality"),
+                    occurrence_count=p["occurrence_count"],
+                    last_status=p["last_status"],
+                    confidence=p["confidence"],
+                )
+                for p in data["top_patterns"]
+            ],
+        )
+
+
+@mcp.tool()
+async def get_health_report(project_key: str) -> HealthReport:
+    """获取项目测试套件综合健康度报告。
+    包含六维指标评分（通过率、稳定性、脆弱性、修复速度、复发率、慢测试占比）、
+    A-F 等级、退化预警和趋势判断。"""
+
+    from app.services.health import compute_health
+
+    async with async_session() as db:
+        data = await compute_health(project_key, db)
+        return HealthReport(
+            project_key=data["project_key"],
+            grade=data["grade"],
+            total_score=data["total_score"],
+            indicators=[
+                HealthIndicator(
+                    name=ind["name"],
+                    raw_value=ind["raw_value"],
+                    score=ind["score"],
+                    weight=ind["weight"],
+                    threshold=ind["threshold"],
+                    status=ind["status"],
+                )
+                for ind in data["indicators"]
+            ],
+            alerts=[
+                DegradationAlert(
+                    indicator=a["indicator"],
+                    severity=a["severity"],
+                    consecutive_drops=a["consecutive_drops"],
+                    total_drop=a["total_drop"],
+                )
+                for a in data["alerts"]
+            ],
+            trend=data["trend"],
         )

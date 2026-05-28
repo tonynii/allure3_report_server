@@ -6,6 +6,14 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+_project_locks: dict[str, asyncio.Lock] = {}
+
+
+def acquire_project_lock(project_key: str) -> asyncio.Lock:
+    if project_key not in _project_locks:
+        _project_locks[project_key] = asyncio.Lock()
+    return _project_locks[project_key]
+
 
 async def generate_allure_config(project_key: str, allure_config: str | None, project_name: str) -> Path:
     """Write allurerc.mjs from DB config or default."""

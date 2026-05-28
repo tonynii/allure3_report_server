@@ -29,9 +29,14 @@ mcp = FastMCP(
         "4. 用 analyze_failures 对失败测试做智能分析（推荐入口）\n"
         "5. 用 list_failed_tests 只看失败/异常的测试\n"
         "6. 用 get_test_detail 查看单个测试的步骤树和错误堆栈\n"
-        "7. 用 compare_runs 对比多次运行的差异\n"
-        "8. 用 get_run_trend 查看通过率趋势\n\n"
-        "典型工作流：list_projects → list_runs → analyze_failures → get_test_detail"
+        "7. 用 fingerprint_failure 生成失败测试的六维指纹向量\n"
+        "8. 用 query_failure_kb 查询历史知识库中是否有匹配模式\n"
+        "9. 用 get_kb_overview 查看项目失败知识库概况\n"
+        "10. 用 compare_runs 对比多次运行的差异\n"
+        "11. 用 get_run_trend 查看通过率趋势\n"
+        "12. 用 get_health_report 获取六维健康度综合评分\n\n"
+        "典型工作流：list_projects → list_runs → analyze_failures → get_test_detail\n"
+        "健康度工作流：get_health_report → get_kb_overview → analyze_failures"
     ),
     stateless_http=True,
     json_response=True,

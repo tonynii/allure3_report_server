@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import mimetypes
@@ -23,7 +24,7 @@ from app.schemas import (
     TestResultSummary,
     TestResultDetail,
 )
-from app.services.allure_cli import generate_report, cleanup_history_for_runs
+from app.services.allure_cli import generate_report, cleanup_history_for_runs, acquire_project_lock
 from app.services.result_parser import parse_results
 from app.services.cleanup import cleanup_old_runs
 
@@ -312,7 +313,8 @@ async def delete_run(project_key: str, run_id: str, db: AsyncSession = Depends(g
     if run_dir.exists():
         shutil.rmtree(run_dir)
 
-    cleanup_history_for_runs(project_key, [run_id])
+    async with acquire_project_lock(project_key):
+        cleanup_history_for_runs(project_key, [run_id])
 
 
 @router.post("/{project_key}/runs/{run_id}/regenerate", response_model=RunResponse)
@@ -400,13 +402,14 @@ async def _process_run(run_id: str, project_key: str, project_name: str, allure_
         try:
             await parse_results(run, db)
             await db.commit()
-            await generate_report(project_key, run_id, project_name, allure_config)
+
+            lock = acquire_project_lock(project_key)
+            async with lock:
+                await generate_report(project_key, run_id, project_name, allure_config)
 
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)
             await db.commit()
-
-            await _cleanup_if_needed(project_key)
 
         except Exception as e:
             logger.exception("Failed to process run %s: %s", run_id, e)
@@ -414,6 +417,31 @@ async def _process_run(run_id: str, project_key: str, project_name: str, allure_
             run.error_message = str(e)[:1000]
             run.completed_at = datetime.now(timezone.utc)
             await db.commit()
+            return
+
+    asyncio.create_task(_kb_sync_task(run_id, project_key))
+
+    lock = acquire_project_lock(project_key)
+    async with lock:
+        await _cleanup_if_needed(project_key)
+
+
+async def _kb_sync_task(run_id: str, project_key: str):
+    from app.database import async_session
+    from app.services.failure_kb import sync_run_failures
+
+    try:
+        async with async_session() as db:
+            results = await sync_run_failures(run_id, project_key, db)
+            await db.commit()
+        logger.info(
+            "KB sync done for run %s: %d matched, %d new",
+            run_id,
+            sum(1 for r in results if r.match_tier != "new"),
+            sum(1 for r in results if r.match_tier == "new"),
+        )
+    except Exception as e:
+        logger.warning("KB sync failed for run %s (non-critical): %s", run_id, e)
 
 
 async def _cleanup_if_needed(project_key: str):
@@ -433,7 +461,9 @@ async def _regenerate_run(run_id: str, project_key: str, project_name: str, allu
             return
 
         try:
-            await generate_report(project_key, run_id, project_name, allure_config)
+            lock = acquire_project_lock(project_key)
+            async with lock:
+                await generate_report(project_key, run_id, project_name, allure_config)
 
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc)

@@ -43,6 +43,15 @@ export interface DashboardData {
 
 export const getDashboard = () => client.get<DashboardData>('/api/dashboard')
 
+export interface McpInfo {
+  endpoint: string
+  protocol: string
+  tools_count: number
+  resources_count: number
+  prompts_count: number
+  version: string
+}
+
 export interface SettingsProject {
   key: string
   name: string
@@ -60,6 +69,7 @@ export interface SettingsData {
   allure_version: string
   database_size_human: string
   total_dir_size_human: string
+  mcp: McpInfo
   projects: SettingsProject[]
 }
 

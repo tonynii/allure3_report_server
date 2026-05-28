@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     base_url: str = ""
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8001
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
 
     def build_url(self, path: str) -> str:
         """Return a full URL if base_url is set, otherwise return the relative path."""

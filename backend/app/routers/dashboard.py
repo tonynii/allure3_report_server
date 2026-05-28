@@ -1,4 +1,6 @@
 import os
+from importlib.metadata import version as _pkg_version
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -173,5 +175,25 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "database_size_human": _format_bytes(db_size),
         "total_dir_size_bytes": total_dir_size,
         "total_dir_size_human": _format_bytes(total_dir_size),
+        "mcp": _get_mcp_info(),
         "projects": project_list,
+    }
+
+
+def _get_mcp_version() -> str:
+    try:
+        return _pkg_version("mcp")
+    except Exception:
+        return "unknown"
+
+
+def _get_mcp_info() -> dict:
+    from app.mcp.server import mcp as _mcp
+    return {
+        "endpoint": "/mcp",
+        "protocol": "streamable-http",
+        "tools_count": len(_mcp._tool_manager._tools),
+        "resources_count": len(_mcp._resource_manager._resources) + len(_mcp._resource_manager._templates),
+        "prompts_count": len(_mcp._prompt_manager._prompts),
+        "version": _get_mcp_version(),
     }

@@ -115,6 +115,25 @@ const columns = [
             </n-descriptions>
           </n-card>
         </n-gi>
+        <n-gi v-if="data?.mcp">
+          <n-card size="small" title="MCP Server">
+            <n-descriptions :columns="1" label-placement="left" size="small">
+              <n-descriptions-item label="端点">{{ data.mcp.endpoint }}</n-descriptions-item>
+              <n-descriptions-item label="协议">{{ data.mcp.protocol }}</n-descriptions-item>
+              <n-descriptions-item label="SDK">v{{ data.mcp.version }}</n-descriptions-item>
+              <n-descriptions-item label="Tools">{{ data.mcp.tools_count }}</n-descriptions-item>
+              <n-descriptions-item label="Resources">{{ data.mcp.resources_count }}</n-descriptions-item>
+              <n-descriptions-item label="Prompts">{{ data.mcp.prompts_count }}</n-descriptions-item>
+            </n-descriptions>
+            <n-divider style="margin: 12px 0" />
+            <n-text depth="3" style="font-size: 12px">Cursor / VS Code / Chatbox 连接配置：</n-text>
+            <n-code
+              code='{"mcpServers":{"allure3":{"url":"http://..."}}}'
+              language="json"
+              style="margin-top: 6px; font-size: 12px"
+            />
+          </n-card>
+        </n-gi>
       </n-grid>
 
       <n-h3 style="margin-bottom: 12px">项目概况</n-h3>

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, BigInteger, DateTime, ForeignKey, Enum, func
+from sqlalchemy import Column, Float, String, Text, Integer, BigInteger, DateTime, ForeignKey, Enum, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -122,3 +122,41 @@ class TestAttachment(Base):
 
     test_result: Mapped["TestResult | None"] = relationship("TestResult", back_populates="attachments", foreign_keys=[test_result_id])
     step: Mapped["TestStep | None"] = relationship("TestStep", back_populates="attachments", foreign_keys=[step_id])
+
+
+class FailurePattern(Base):
+    __tablename__ = "failure_patterns"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_key: Mapped[str] = mapped_column(String(100), ForeignKey("projects.key", ondelete="CASCADE"), nullable=False)
+    signature_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    error_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    error_location: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_exemplar: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_modality: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(String(20), default="active")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped["Project"] = relationship("Project")
+
+
+class RemediationRule(Base):
+    __tablename__ = "remediation_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_key: Mapped[str] = mapped_column(String(100), ForeignKey("projects.key", ondelete="CASCADE"), nullable=False)
+    error_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    location_pattern: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    suggestion: Mapped[str] = mapped_column(Text, nullable=False)
+    code_locations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.7)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(50), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped["Project"] = relationship("Project")

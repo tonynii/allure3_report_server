@@ -1,6 +1,5 @@
 import json
 import logging
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,11 +149,7 @@ async def _parse_attachments(
             src_file = results_dir / source
             if src_file.exists():
                 size = src_file.stat().st_size
-                # Copy attachment to project storage for persistence
-                dest = settings.project_dir(test_result.run.project_key) / "attachments" / source
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_file, dest)
-                file_path = str(dest)
+                file_path = str(src_file)
 
         att = TestAttachment(
             test_result_id=test_result.id,
